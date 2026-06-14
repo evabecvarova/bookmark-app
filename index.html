@@ -13,7 +13,23 @@
       <p class="app__subtitle">A calm little home for your favorite links.</p>
     </header>
 
-    <!-- Add form: a name and a link -->
+    <!-- Create a category -->
+    <form id="category-form" class="card form form--inline" autocomplete="off">
+      <label class="field field--grow">
+        <span class="field__label">New category</span>
+        <input
+          type="text"
+          id="category-input"
+          class="input"
+          placeholder="e.g. Work, Reading, Tools"
+          required
+        />
+      </label>
+      <button type="submit" class="btn btn--ghost">Add category</button>
+      <p id="category-error" class="form__error" role="alert"></p>
+    </form>
+
+    <!-- Add a bookmark: a name, a link, and a category -->
     <form id="bookmark-form" class="card form" autocomplete="off">
       <label class="field">
         <span class="field__label">Name</span>
@@ -37,13 +53,18 @@
         />
       </label>
 
+      <label class="field">
+        <span class="field__label">Category</span>
+        <select id="category-select" class="input"></select>
+      </label>
+
       <button type="submit" class="btn btn--primary">Add bookmark</button>
       <p id="form-error" class="form__error" role="alert"></p>
     </form>
 
-    <!-- The saved bookmarks render here -->
-    <ul id="bookmark-list" class="list"></ul>
-    <p id="empty-state" class="empty">No bookmarks yet — add your first one above.</p>
+    <!-- Bookmarks render here, grouped under category headings -->
+    <section id="bookmark-groups" class="groups"></section>
+    <p id="empty-state" class="empty">Create a category to start adding bookmarks.</p>
   </main>
 
   <script src="script.js"></script>

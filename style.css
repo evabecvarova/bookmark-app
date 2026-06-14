@@ -67,7 +67,23 @@ body {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  margin-bottom: 1.75rem;
+  margin-bottom: 1.25rem;
+}
+
+/* Inline variant: label/input grows, button sits beside it. */
+.form--inline {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+
+.field--grow {
+  flex: 1 1 220px;
+}
+
+/* The category form's button aligns to the bottom of the row. */
+.form--inline .btn {
+  height: 2.6rem;
 }
 
 .field {
@@ -145,6 +161,46 @@ body {
 .btn--ghost:hover {
   background: var(--bg);
   color: var(--text);
+}
+
+/* --- Category groups --- */
+.groups {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.group__heading {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Small count pill next to each category heading. */
+.group__count {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.05rem 0.5rem;
+  min-width: 1.4rem;
+  text-align: center;
+}
+
+.group__empty {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  font-style: italic;
+  padding: 0.25rem 0;
 }
 
 /* --- Bookmark list --- */
