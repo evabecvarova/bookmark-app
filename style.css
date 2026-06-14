@@ -233,6 +233,24 @@ body {
   min-width: 0;
 }
 
+/* Inline edit form that replaces a bookmark row while editing. */
+.bookmark__edit {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  width: 100%;
+}
+
+.bookmark__edit-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* Keep the error message compact inside the edit row. */
+.bookmark__edit .form__error {
+  margin: 0;
+}
+
 .bookmark__name {
   font-weight: 600;
   display: block;

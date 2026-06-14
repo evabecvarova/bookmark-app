@@ -17,6 +17,10 @@ const errorEl = document.getElementById("form-error");
 const groupsEl = document.getElementById("bookmark-groups");
 const emptyState = document.getElementById("empty-state");
 
+// Which bookmark is currently being edited (null = none). When this matches a
+// bookmark's id, that row renders as an inline edit form instead of a link.
+let editingId = null;
+
 // --- Data helpers ---------------------------------------------------------
 
 function loadBookmarks() {
@@ -58,10 +62,16 @@ function populateCategorySelect(categories) {
   }
 }
 
-// Build one bookmark row (a <li>).
+// Build one bookmark row (a <li>). If this bookmark is being edited, the row
+// shows the edit form instead of the usual name/link display.
 function buildBookmarkItem(bookmark) {
   const li = document.createElement("li");
   li.className = "bookmark";
+
+  if (bookmark.id === editingId) {
+    li.append(buildEditForm(bookmark));
+    return li;
+  }
 
   const info = document.createElement("div");
   info.className = "bookmark__info";
@@ -79,8 +89,91 @@ function buildBookmarkItem(bookmark) {
   link.textContent = bookmark.url;
 
   info.append(name, link);
-  li.append(info);
+
+  const editBtn = document.createElement("button");
+  editBtn.className = "btn btn--ghost";
+  editBtn.textContent = "Edit";
+  editBtn.addEventListener("click", () => startEdit(bookmark.id));
+
+  li.append(info, editBtn);
   return li;
+}
+
+// Build the inline edit form shown in place of a bookmark while editing.
+// Lets you change the name, link, and category. Save validates and writes;
+// Cancel discards. Enter saves, Escape cancels.
+function buildEditForm(bookmark) {
+  const editForm = document.createElement("form");
+  editForm.className = "bookmark__edit";
+  editForm.autocomplete = "off";
+
+  const nameField = document.createElement("input");
+  nameField.type = "text";
+  nameField.className = "input";
+  nameField.value = bookmark.name;
+  nameField.setAttribute("aria-label", "Edit name");
+
+  const urlField = document.createElement("input");
+  urlField.type = "url";
+  urlField.className = "input";
+  urlField.value = bookmark.url;
+  urlField.setAttribute("aria-label", "Edit link");
+
+  // Category picker, pre-selected to the bookmark's current category.
+  const categoryField = document.createElement("select");
+  categoryField.className = "input";
+  categoryField.setAttribute("aria-label", "Edit category");
+  loadCategories().forEach((category) => {
+    const option = document.createElement("option");
+    option.value = category.id;
+    option.textContent = category.name;
+    categoryField.append(option);
+  });
+  categoryField.value = bookmark.categoryId;
+
+  const error = document.createElement("p");
+  error.className = "form__error";
+
+  const actions = document.createElement("div");
+  actions.className = "bookmark__edit-actions";
+
+  const saveBtn = document.createElement("button");
+  saveBtn.type = "submit";
+  saveBtn.className = "btn btn--primary";
+  saveBtn.textContent = "Save";
+
+  const cancelBtn = document.createElement("button");
+  cancelBtn.type = "button";
+  cancelBtn.className = "btn btn--ghost";
+  cancelBtn.textContent = "Cancel";
+  cancelBtn.addEventListener("click", cancelEdit);
+
+  actions.append(saveBtn, cancelBtn);
+  editForm.append(nameField, urlField, categoryField, actions, error);
+
+  // Save on submit (covers clicking Save and pressing Enter in a field).
+  editForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const newName = nameField.value.trim();
+    const newUrl = urlField.value.trim();
+
+    if (!newName || !newUrl) {
+      error.textContent = "Please fill in both a name and a link.";
+      return;
+    }
+
+    updateBookmark(bookmark.id, newName, newUrl, categoryField.value);
+  });
+
+  // Escape cancels editing.
+  editForm.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") cancelEdit();
+  });
+
+  // Put the cursor in the name field once the form is on the page.
+  queueMicrotask(() => nameField.focus());
+
+  return editForm;
 }
 
 // Build one category group: a heading plus its bookmarks (or a faint hint
@@ -166,6 +259,29 @@ function addBookmark(name, url, categoryId) {
     categoryId: categoryId,
   });
   saveBookmarks(bookmarks);
+  render();
+}
+
+// Switch a bookmark's row into edit mode.
+function startEdit(id) {
+  editingId = id;
+  render();
+}
+
+// Leave edit mode without saving.
+function cancelEdit() {
+  editingId = null;
+  render();
+}
+
+// Save edited values back to the matching bookmark, keeping its id. The new
+// categoryId may differ, which moves the bookmark to another group.
+function updateBookmark(id, name, url, categoryId) {
+  const bookmarks = loadBookmarks().map((b) =>
+    b.id === id ? { ...b, name: name, url: url, categoryId: categoryId } : b
+  );
+  saveBookmarks(bookmarks);
+  editingId = null;
   render();
 }
 
