@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bookmarks</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="app">
+    <header class="app__header">
+      <h1 class="app__title">Bookmarks</h1>
+      <p class="app__subtitle">A calm little home for your favorite links.</p>
+    </header>
+
+    <!-- Add form: a name and a link -->
+    <form id="bookmark-form" class="card form" autocomplete="off">
+      <label class="field">
+        <span class="field__label">Name</span>
+        <input
+          type="text"
+          id="name-input"
+          class="input"
+          placeholder="e.g. Claude"
+          required
+        />
+      </label>
+
+      <label class="field">
+        <span class="field__label">Link</span>
+        <input
+          type="url"
+          id="url-input"
+          class="input"
+          placeholder="https://claude.ai"
+          required
+        />
+      </label>
+
+      <button type="submit" class="btn btn--primary">Add bookmark</button>
+      <p id="form-error" class="form__error" role="alert"></p>
+    </form>
+
+    <!-- The saved bookmarks render here -->
+    <ul id="bookmark-list" class="list"></ul>
+    <p id="empty-state" class="empty">No bookmarks yet — add your first one above.</p>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>
