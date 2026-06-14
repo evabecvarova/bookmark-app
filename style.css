@@ -163,6 +163,20 @@ body {
   color: var(--text);
 }
 
+.btn--danger {
+  background: transparent;
+  color: #b91c1c;
+  border: 1px solid var(--border);
+  padding: 0.45rem 0.7rem;
+  font-size: 0.85rem;
+}
+
+.btn--danger:hover {
+  background: #b91c1c;
+  color: #fff;
+  border-color: #b91c1c;
+}
+
 /* --- Category groups --- */
 .groups {
   display: flex;
@@ -231,6 +245,14 @@ body {
 
 .bookmark__info {
   min-width: 0;
+}
+
+/* Edit + Delete buttons grouped on the right of a bookmark row. */
+.bookmark__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
 }
 
 /* Inline edit form that replaces a bookmark row while editing. */

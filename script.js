@@ -90,12 +90,28 @@ function buildBookmarkItem(bookmark) {
 
   info.append(name, link);
 
+  // Action buttons: Edit (inline form) and Delete (remove this bookmark).
+  const actions = document.createElement("div");
+  actions.className = "bookmark__actions";
+
   const editBtn = document.createElement("button");
   editBtn.className = "btn btn--ghost";
   editBtn.textContent = "Edit";
   editBtn.addEventListener("click", () => startEdit(bookmark.id));
 
-  li.append(info, editBtn);
+  const deleteBtn = document.createElement("button");
+  deleteBtn.className = "btn btn--danger";
+  deleteBtn.textContent = "Delete";
+  deleteBtn.addEventListener("click", () => {
+    // A quick confirm so a click can't wipe a bookmark by accident.
+    if (confirm(`Delete "${bookmark.name}"?`)) {
+      deleteBookmark(bookmark.id);
+    }
+  });
+
+  actions.append(editBtn, deleteBtn);
+
+  li.append(info, actions);
   return li;
 }
 
@@ -258,6 +274,13 @@ function addBookmark(name, url, categoryId) {
     url: url,
     categoryId: categoryId,
   });
+  saveBookmarks(bookmarks);
+  render();
+}
+
+// Remove a bookmark by its id.
+function deleteBookmark(id) {
+  const bookmarks = loadBookmarks().filter((b) => b.id !== id);
   saveBookmarks(bookmarks);
   render();
 }
