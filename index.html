@@ -62,8 +62,21 @@
       <p id="form-error" class="form__error" role="alert"></p>
     </form>
 
+    <!-- Search + bulk collapse/expand. Hidden until a category exists. -->
+    <div id="toolbar" class="toolbar" hidden>
+      <input
+        type="search"
+        id="search-input"
+        class="input"
+        placeholder="Search bookmarks…"
+        aria-label="Search bookmarks"
+      />
+      <button type="button" id="toggle-all" class="btn btn--ghost">Collapse all</button>
+    </div>
+
     <!-- Bookmarks render here, grouped under category headings -->
     <section id="bookmark-groups" class="groups"></section>
+    <p id="no-results" class="empty" hidden>No bookmarks match your search.</p>
     <p id="empty-state" class="empty">Create a category to start adding bookmarks.</p>
   </main>
 

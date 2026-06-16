@@ -2,6 +2,7 @@
 
 const STORAGE_KEY = "bookmarks";
 const CATEGORIES_KEY = "categories";
+const COLLAPSED_KEY = "collapsedCategories";
 
 // Grab the elements we'll work with.
 const categoryForm = document.getElementById("category-form");
@@ -17,9 +18,17 @@ const errorEl = document.getElementById("form-error");
 const groupsEl = document.getElementById("bookmark-groups");
 const emptyState = document.getElementById("empty-state");
 
+const toolbar = document.getElementById("toolbar");
+const searchInput = document.getElementById("search-input");
+const toggleAllBtn = document.getElementById("toggle-all");
+const noResults = document.getElementById("no-results");
+
 // Which bookmark is currently being edited (null = none). When this matches a
 // bookmark's id, that row renders as an inline edit form instead of a link.
 let editingId = null;
+
+// The current search text (lower-cased). Empty string means "show everything".
+let searchQuery = "";
 
 // --- Data helpers ---------------------------------------------------------
 
@@ -39,6 +48,67 @@ function loadCategories() {
 
 function saveCategories(categories) {
   localStorage.setItem(CATEGORIES_KEY, JSON.stringify(categories));
+}
+
+// Collapsed categories are stored as an array of category ids. We keep it as a
+// Set in memory for quick has()/add()/delete(), and persist it as an array.
+function loadCollapsed() {
+  const raw = localStorage.getItem(COLLAPSED_KEY);
+  return new Set(raw ? JSON.parse(raw) : []);
+}
+
+function saveCollapsed(set) {
+  localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...set]));
+}
+
+// Flip one category between collapsed and expanded, then re-render.
+function toggleCollapsed(categoryId) {
+  const collapsed = loadCollapsed();
+  if (collapsed.has(categoryId)) {
+    collapsed.delete(categoryId);
+  } else {
+    collapsed.add(categoryId);
+  }
+  saveCollapsed(collapsed);
+  render();
+}
+
+// --- Small utilities ------------------------------------------------------
+
+// Pull the hostname out of a URL for a compact, readable label (e.g.
+// "claude.ai" instead of the full "https://claude.ai/chat/..."). Falls back to
+// the raw string if the URL can't be parsed.
+function hostnameOf(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+
+// A tiny favicon for a bookmark, fetched from Google's favicon service. If it
+// fails to load we just hide the broken-image icon.
+function buildFavicon(url) {
+  const img = document.createElement("img");
+  img.className = "bookmark__favicon";
+  img.width = 16;
+  img.height = 16;
+  img.alt = "";
+  img.loading = "lazy";
+  img.src = `https://www.google.com/s/favicons?sz=32&domain=${hostnameOf(url)}`;
+  img.addEventListener("error", () => {
+    img.style.visibility = "hidden";
+  });
+  return img;
+}
+
+// Does a bookmark match the current search text? Matches on name or URL.
+function matchesSearch(bookmark) {
+  if (!searchQuery) return true;
+  return (
+    bookmark.name.toLowerCase().includes(searchQuery) ||
+    bookmark.url.toLowerCase().includes(searchQuery)
+  );
 }
 
 // --- Rendering ------------------------------------------------------------
@@ -73,6 +143,8 @@ function buildBookmarkItem(bookmark) {
     return li;
   }
 
+  const favicon = buildFavicon(bookmark.url);
+
   const info = document.createElement("div");
   info.className = "bookmark__info";
 
@@ -81,12 +153,14 @@ function buildBookmarkItem(bookmark) {
   name.className = "bookmark__name";
   name.textContent = bookmark.name;
 
+  // Compact rows show just the hostname; the full URL stays in href + title.
   const link = document.createElement("a");
   link.className = "bookmark__link";
   link.href = bookmark.url;
   link.target = "_blank";
   link.rel = "noopener noreferrer";
-  link.textContent = bookmark.url;
+  link.title = bookmark.url;
+  link.textContent = hostnameOf(bookmark.url);
 
   info.append(name, link);
 
@@ -111,7 +185,7 @@ function buildBookmarkItem(bookmark) {
 
   actions.append(editBtn, deleteBtn);
 
-  li.append(info, actions);
+  li.append(favicon, info, actions);
   return li;
 }
 
@@ -192,42 +266,68 @@ function buildEditForm(bookmark) {
   return editForm;
 }
 
-// Build one category group: a heading plus its bookmarks (or a faint hint
-// when the category is still empty).
-function buildGroup(title, bookmarks) {
+// Build one category group: a clickable heading that collapses/expands its
+// bookmarks (or a faint hint when the category is still empty). The count pill
+// stays visible even when collapsed, so you can see what's inside at a glance.
+//
+// `isCollapsed` controls the folded state. While a search is active the caller
+// forces groups open so matches are always visible.
+function buildGroup(id, title, bookmarks, isCollapsed) {
   const group = document.createElement("section");
   group.className = "group";
+  if (isCollapsed) group.classList.add("group--collapsed");
 
-  const heading = document.createElement("h2");
+  // The heading is a real <button> so it's keyboard-focusable and toggles on
+  // Enter/Space for free.
+  const heading = document.createElement("button");
+  heading.type = "button";
   heading.className = "group__heading";
-  heading.textContent = title;
+  heading.setAttribute("aria-expanded", String(!isCollapsed));
+
+  const chevron = document.createElement("span");
+  chevron.className = "group__chevron";
+  chevron.setAttribute("aria-hidden", "true");
+  chevron.textContent = "▸";
+
+  const titleEl = document.createElement("span");
+  titleEl.className = "group__title";
+  titleEl.textContent = title;
 
   const count = document.createElement("span");
   count.className = "group__count";
   count.textContent = bookmarks.length;
-  heading.append(count);
 
+  heading.append(chevron, titleEl, count);
+  heading.addEventListener("click", () => toggleCollapsed(id));
   group.append(heading);
 
-  if (bookmarks.length === 0) {
-    const hint = document.createElement("p");
-    hint.className = "group__empty";
-    hint.textContent = "No bookmarks here yet.";
-    group.append(hint);
-  } else {
-    const list = document.createElement("ul");
-    list.className = "list";
-    bookmarks.forEach((bookmark) => list.append(buildBookmarkItem(bookmark)));
-    group.append(list);
+  // The collapsible body. Skipped entirely when the group is folded.
+  if (!isCollapsed) {
+    if (bookmarks.length === 0) {
+      const hint = document.createElement("p");
+      hint.className = "group__empty";
+      hint.textContent = "No bookmarks here yet.";
+      group.append(hint);
+    } else {
+      const list = document.createElement("ul");
+      list.className = "list";
+      bookmarks.forEach((bookmark) => list.append(buildBookmarkItem(bookmark)));
+      group.append(list);
+    }
   }
 
   return group;
 }
 
+// Synthetic id for the catch-all "Uncategorized" group.
+const UNCATEGORIZED_ID = "__uncategorized__";
+
 // Rebuild everything on screen from the saved data.
 function render() {
   const categories = loadCategories();
   const bookmarks = loadBookmarks();
+  const collapsed = loadCollapsed();
+  const searching = searchQuery !== "";
 
   populateCategorySelect(categories);
   groupsEl.innerHTML = "";
@@ -235,23 +335,53 @@ function render() {
   // Nothing to group under until at least one category exists.
   if (categories.length === 0) {
     emptyState.style.display = "block";
+    toolbar.hidden = true;
+    noResults.hidden = true;
     return;
   }
   emptyState.style.display = "none";
+  toolbar.hidden = false;
 
-  // One group per category, in the order they were created.
-  categories.forEach((category) => {
-    const items = bookmarks.filter((b) => b.categoryId === category.id);
-    groupsEl.append(buildGroup(category.name, items));
+  // Build the list of groups to show: one per category, plus a catch-all for
+  // orphaned bookmarks. While searching, only matching bookmarks are kept and
+  // empty groups are dropped so results stand out.
+  const knownIds = new Set(categories.map((c) => c.id));
+  const groups = categories.map((category) => ({
+    id: category.id,
+    title: category.name,
+    items: bookmarks.filter((b) => b.categoryId === category.id && matchesSearch(b)),
+  }));
+
+  const orphans = bookmarks.filter(
+    (b) => !knownIds.has(b.categoryId) && matchesSearch(b)
+  );
+  if (orphans.length > 0) {
+    groups.push({ id: UNCATEGORIZED_ID, title: "Uncategorized", items: orphans });
+  }
+
+  let shown = 0;
+  groups.forEach((g) => {
+    // While searching, hide groups with no matches and force the rest open.
+    if (searching && g.items.length === 0) return;
+    const isCollapsed = !searching && collapsed.has(g.id);
+    groupsEl.append(buildGroup(g.id, g.title, g.items, isCollapsed));
+    shown += 1;
   });
 
-  // Safety net: bookmarks whose category no longer exists (or never had one)
-  // are shown under "Uncategorized" so they're never lost.
-  const knownIds = new Set(categories.map((c) => c.id));
-  const orphans = bookmarks.filter((b) => !knownIds.has(b.categoryId));
-  if (orphans.length > 0) {
-    groupsEl.append(buildGroup("Uncategorized", orphans));
-  }
+  // "No results" only applies while searching.
+  noResults.hidden = !(searching && shown === 0);
+
+  updateToggleAllLabel();
+}
+
+// The bulk button reads "Expand all" when everything is already collapsed,
+// otherwise "Collapse all".
+function updateToggleAllLabel() {
+  const categories = loadCategories();
+  const collapsed = loadCollapsed();
+  const allCollapsed =
+    categories.length > 0 && categories.every((c) => collapsed.has(c.id));
+  toggleAllBtn.textContent = allCollapsed ? "Expand all" : "Collapse all";
 }
 
 // --- Actions --------------------------------------------------------------
@@ -358,6 +488,27 @@ form.addEventListener("submit", (event) => {
   nameInput.value = "";
   urlInput.value = "";
   nameInput.focus();
+});
+
+// Filter as the user types. Empty input shows everything again.
+searchInput.addEventListener("input", () => {
+  searchQuery = searchInput.value.trim().toLowerCase();
+  render();
+});
+
+// Collapse every category at once, or expand them all if they're already
+// collapsed. (Mirrors the label set by updateToggleAllLabel.)
+toggleAllBtn.addEventListener("click", () => {
+  const categories = loadCategories();
+  const collapsed = loadCollapsed();
+  const allCollapsed = categories.every((c) => collapsed.has(c.id));
+
+  if (allCollapsed) {
+    saveCollapsed(new Set());
+  } else {
+    saveCollapsed(new Set(categories.map((c) => c.id)));
+  }
+  render();
 });
 
 // Show everything as soon as the page loads.
