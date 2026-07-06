@@ -8,76 +8,92 @@
 </head>
 <body>
   <main class="app">
-    <header class="app__header">
-      <h1 class="app__title">Bookmarks</h1>
-      <p class="app__subtitle">A calm little home for your favorite links.</p>
-    </header>
+    <!-- Two-pane layout: folder sidebar (left) + selected folder's contents
+         (right). On mobile only one pane shows at a time; opening a folder adds
+         `layout--show-content` to swap the sidebar out for the contents. -->
+    <div class="layout" id="layout">
 
-    <!-- Create a category -->
-    <form id="category-form" class="card form form--inline" autocomplete="off">
-      <label class="field field--grow">
-        <span class="field__label">New category</span>
+      <!-- Sidebar: brand, add-folder, search, and the list of all folders. -->
+      <aside class="sidebar">
+        <header class="sidebar__head">
+          <h1 class="sidebar__title">Bookmarks</h1>
+          <p class="sidebar__subtitle">A calm home for your links.</p>
+        </header>
+
+        <!-- Create a folder (category). -->
+        <form id="category-form" class="form form--inline" autocomplete="off">
+          <label class="field field--grow">
+            <span class="field__label">New folder</span>
+            <input
+              type="text"
+              id="category-input"
+              class="input"
+              placeholder="e.g. Work, Reading, Tools"
+              required
+            />
+          </label>
+          <button type="submit" class="btn btn--ghost">Add</button>
+          <p id="category-error" class="form__error" role="alert"></p>
+        </form>
+
+        <!-- Search across every folder. -->
         <input
-          type="text"
-          id="category-input"
-          class="input"
-          placeholder="e.g. Work, Reading, Tools"
-          required
+          type="search"
+          id="search-input"
+          class="input search"
+          placeholder="Search all bookmarks…"
+          aria-label="Search bookmarks"
         />
-      </label>
-      <button type="submit" class="btn btn--ghost">Add category</button>
-      <p id="category-error" class="form__error" role="alert"></p>
-    </form>
 
-    <!-- Add a bookmark: a name, a link, and a category -->
-    <form id="bookmark-form" class="card form" autocomplete="off">
-      <label class="field">
-        <span class="field__label">Name</span>
-        <input
-          type="text"
-          id="name-input"
-          class="input"
-          placeholder="e.g. Claude"
-          required
-        />
-      </label>
+        <!-- Folder list renders here; each folder is a clickable button. -->
+        <nav id="folder-list" class="folders" aria-label="Folders"></nav>
+      </aside>
 
-      <label class="field">
-        <span class="field__label">Link</span>
-        <input
-          type="url"
-          id="url-input"
-          class="input"
-          placeholder="https://claude.ai"
-          required
-        />
-      </label>
+      <!-- Content: the open folder's header, the add-bookmark form, and its
+           bookmarks (or search results across all folders). -->
+      <section class="content">
+        <header class="content__head">
+          <!-- Only visible on mobile: jumps back to the folder list. -->
+          <button type="button" id="back-btn" class="btn btn--ghost content__back">← Folders</button>
+          <h2 id="content-title" class="content__title">Bookmarks</h2>
+          <span id="content-count" class="group__count" hidden></span>
+        </header>
 
-      <label class="field">
-        <span class="field__label">Category</span>
-        <select id="category-select" class="input"></select>
-      </label>
+        <!-- Add a bookmark to the currently open folder. -->
+        <form id="bookmark-form" class="form" autocomplete="off">
+          <div class="form__row">
+            <label class="field field--grow">
+              <span class="field__label">Name</span>
+              <input
+                type="text"
+                id="name-input"
+                class="input"
+                placeholder="e.g. Claude"
+                required
+              />
+            </label>
+            <label class="field field--grow">
+              <span class="field__label">Link</span>
+              <input
+                type="url"
+                id="url-input"
+                class="input"
+                placeholder="https://claude.ai"
+                required
+              />
+            </label>
+          </div>
+          <button type="submit" class="btn btn--primary">Add bookmark</button>
+          <p id="form-error" class="form__error" role="alert"></p>
+        </form>
 
-      <button type="submit" class="btn btn--primary">Add bookmark</button>
-      <p id="form-error" class="form__error" role="alert"></p>
-    </form>
+        <!-- Bookmarks of the open folder, or search matches, render here. -->
+        <ul id="bookmark-list" class="list"></ul>
+        <p id="no-results" class="empty" hidden>No bookmarks match your search.</p>
+        <p id="empty-state" class="empty">Create a folder to start adding bookmarks.</p>
+      </section>
 
-    <!-- Search + bulk collapse/expand. Hidden until a category exists. -->
-    <div id="toolbar" class="toolbar" hidden>
-      <input
-        type="search"
-        id="search-input"
-        class="input"
-        placeholder="Search bookmarks…"
-        aria-label="Search bookmarks"
-      />
-      <button type="button" id="toggle-all" class="btn btn--ghost">Collapse all</button>
     </div>
-
-    <!-- Bookmarks render here, grouped under category headings -->
-    <section id="bookmark-groups" class="groups"></section>
-    <p id="no-results" class="empty" hidden>No bookmarks match your search.</p>
-    <p id="empty-state" class="empty">Create a category to start adding bookmarks.</p>
   </main>
 
   <script src="script.js"></script>

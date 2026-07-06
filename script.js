@@ -1,10 +1,16 @@
-// Bookmark app — stores bookmarks AND categories in localStorage (no server).
+// Bookmark app — stores bookmarks AND folders in localStorage (no server).
+//
+// Layout is two panes: a sidebar listing every folder, and a content pane that
+// shows the *selected* folder's bookmarks (or search matches across folders).
 
 const STORAGE_KEY = "bookmarks";
 const CATEGORIES_KEY = "categories";
-const COLLAPSED_KEY = "collapsedCategories";
 
-// Grab the elements we'll work with.
+// Synthetic id for the catch-all "Uncategorized" folder (orphaned bookmarks).
+const UNCATEGORIZED_ID = "__uncategorized__";
+
+// --- Elements -------------------------------------------------------------
+
 const categoryForm = document.getElementById("category-form");
 const categoryInput = document.getElementById("category-input");
 const categoryError = document.getElementById("category-error");
@@ -12,23 +18,29 @@ const categoryError = document.getElementById("category-error");
 const form = document.getElementById("bookmark-form");
 const nameInput = document.getElementById("name-input");
 const urlInput = document.getElementById("url-input");
-const categorySelect = document.getElementById("category-select");
 const errorEl = document.getElementById("form-error");
 
-const groupsEl = document.getElementById("bookmark-groups");
-const emptyState = document.getElementById("empty-state");
+const folderList = document.getElementById("folder-list");
+const bookmarkList = document.getElementById("bookmark-list");
+const contentTitle = document.getElementById("content-title");
+const contentCount = document.getElementById("content-count");
 
-const toolbar = document.getElementById("toolbar");
-const searchInput = document.getElementById("search-input");
-const toggleAllBtn = document.getElementById("toggle-all");
+const emptyState = document.getElementById("empty-state");
 const noResults = document.getElementById("no-results");
 
-// Which bookmark is currently being edited (null = none). When this matches a
-// bookmark's id, that row renders as an inline edit form instead of a link.
+const searchInput = document.getElementById("search-input");
+const backBtn = document.getElementById("back-btn");
+const layout = document.getElementById("layout");
+
+// Which bookmark is currently being edited (null = none).
 let editingId = null;
 
-// The current search text (lower-cased). Empty string means "show everything".
+// The current search text (lower-cased). Empty string means "not searching".
 let searchQuery = "";
+
+// Which folder is open in the content pane (a category id, UNCATEGORIZED_ID,
+// or null when nothing is selected yet).
+let selectedCategoryId = null;
 
 // --- Data helpers ---------------------------------------------------------
 
@@ -50,34 +62,11 @@ function saveCategories(categories) {
   localStorage.setItem(CATEGORIES_KEY, JSON.stringify(categories));
 }
 
-// Collapsed categories are stored as an array of category ids. We keep it as a
-// Set in memory for quick has()/add()/delete(), and persist it as an array.
-function loadCollapsed() {
-  const raw = localStorage.getItem(COLLAPSED_KEY);
-  return new Set(raw ? JSON.parse(raw) : []);
-}
-
-function saveCollapsed(set) {
-  localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...set]));
-}
-
-// Flip one category between collapsed and expanded, then re-render.
-function toggleCollapsed(categoryId) {
-  const collapsed = loadCollapsed();
-  if (collapsed.has(categoryId)) {
-    collapsed.delete(categoryId);
-  } else {
-    collapsed.add(categoryId);
-  }
-  saveCollapsed(collapsed);
-  render();
-}
-
 // --- Small utilities ------------------------------------------------------
 
 // Pull the hostname out of a URL for a compact, readable label (e.g.
-// "claude.ai" instead of the full "https://claude.ai/chat/..."). Falls back to
-// the raw string if the URL can't be parsed.
+// "claude.ai" instead of "https://claude.ai/chat/..."). Falls back to the raw
+// string if the URL can't be parsed.
 function hostnameOf(url) {
   try {
     return new URL(url).hostname.replace(/^www\./, "");
@@ -86,8 +75,8 @@ function hostnameOf(url) {
   }
 }
 
-// A tiny favicon for a bookmark, fetched from Google's favicon service. If it
-// fails to load we just hide the broken-image icon.
+// A tiny favicon for a bookmark, from Google's favicon service. If it fails to
+// load we just hide the broken-image icon.
 function buildFavicon(url) {
   const img = document.createElement("img");
   img.className = "bookmark__favicon";
@@ -111,26 +100,58 @@ function matchesSearch(bookmark) {
   );
 }
 
-// --- Rendering ------------------------------------------------------------
+// The name of a folder for a given category id (or "Uncategorized").
+function categoryName(id) {
+  if (id === UNCATEGORIZED_ID) return "Uncategorized";
+  const category = loadCategories().find((c) => c.id === id);
+  return category ? category.name : "Uncategorized";
+}
 
-// Fill the category <select> with the current categories, keeping the user's
-// current pick selected if it still exists.
-function populateCategorySelect(categories) {
-  const previous = categorySelect.value;
-  categorySelect.innerHTML = "";
+// --- Rendering: sidebar folder list ---------------------------------------
+
+// Build one clickable folder row for the sidebar.
+function buildFolderButton(id, name, count) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "folder";
+  if (id === selectedCategoryId && !searchQuery) {
+    button.classList.add("folder--active");
+  }
+
+  const nameEl = document.createElement("span");
+  nameEl.className = "folder__name";
+  nameEl.textContent = name;
+
+  const countEl = document.createElement("span");
+  countEl.className = "group__count";
+  countEl.textContent = count;
+
+  button.append(nameEl, countEl);
+  button.addEventListener("click", () => selectCategory(id));
+  return button;
+}
+
+// Draw the sidebar: one entry per folder, plus a catch-all "Uncategorized"
+// entry when orphaned bookmarks exist.
+function renderFolders(categories) {
+  const bookmarks = loadBookmarks();
+  folderList.innerHTML = "";
 
   categories.forEach((category) => {
-    const option = document.createElement("option");
-    option.value = category.id;
-    option.textContent = category.name;
-    categorySelect.append(option);
+    const count = bookmarks.filter((b) => b.categoryId === category.id).length;
+    folderList.append(buildFolderButton(category.id, category.name, count));
   });
 
-  // Restore the previous selection when possible.
-  if (categories.some((c) => c.id === previous)) {
-    categorySelect.value = previous;
+  const knownIds = new Set(categories.map((c) => c.id));
+  const orphanCount = bookmarks.filter((b) => !knownIds.has(b.categoryId)).length;
+  if (orphanCount > 0) {
+    folderList.append(
+      buildFolderButton(UNCATEGORIZED_ID, "Uncategorized", orphanCount)
+    );
   }
 }
+
+// --- Rendering: bookmark rows ---------------------------------------------
 
 // Build one bookmark row (a <li>). If this bookmark is being edited, the row
 // shows the edit form instead of the usual name/link display.
@@ -153,7 +174,6 @@ function buildBookmarkItem(bookmark) {
   name.className = "bookmark__name";
   name.textContent = bookmark.name;
 
-  // Compact rows show just the hostname; the full URL stays in href + title.
   const link = document.createElement("a");
   link.className = "bookmark__link";
   link.href = bookmark.url;
@@ -164,7 +184,15 @@ function buildBookmarkItem(bookmark) {
 
   info.append(name, link);
 
-  // Action buttons: Edit (inline form) and Delete (remove this bookmark).
+  // While searching, show which folder each match lives in.
+  if (searchQuery) {
+    const tag = document.createElement("span");
+    tag.className = "bookmark__folder";
+    tag.textContent = categoryName(bookmark.categoryId);
+    info.append(tag);
+  }
+
+  // Action buttons: Edit (inline form) and Delete.
   const actions = document.createElement("div");
   actions.className = "bookmark__actions";
 
@@ -177,7 +205,6 @@ function buildBookmarkItem(bookmark) {
   deleteBtn.className = "btn btn--danger";
   deleteBtn.textContent = "Delete";
   deleteBtn.addEventListener("click", () => {
-    // A quick confirm so a click can't wipe a bookmark by accident.
     if (confirm(`Delete "${bookmark.name}"?`)) {
       deleteBookmark(bookmark.id);
     }
@@ -190,8 +217,7 @@ function buildBookmarkItem(bookmark) {
 }
 
 // Build the inline edit form shown in place of a bookmark while editing.
-// Lets you change the name, link, and category. Save validates and writes;
-// Cancel discards. Enter saves, Escape cancels.
+// Lets you change the name, link, and folder. Enter saves, Escape cancels.
 function buildEditForm(bookmark) {
   const editForm = document.createElement("form");
   editForm.className = "bookmark__edit";
@@ -209,10 +235,10 @@ function buildEditForm(bookmark) {
   urlField.value = bookmark.url;
   urlField.setAttribute("aria-label", "Edit link");
 
-  // Category picker, pre-selected to the bookmark's current category.
+  // Folder picker, pre-selected to the bookmark's current folder.
   const categoryField = document.createElement("select");
   categoryField.className = "input";
-  categoryField.setAttribute("aria-label", "Edit category");
+  categoryField.setAttribute("aria-label", "Edit folder");
   loadCategories().forEach((category) => {
     const option = document.createElement("option");
     option.value = category.id;
@@ -241,7 +267,6 @@ function buildEditForm(bookmark) {
   actions.append(saveBtn, cancelBtn);
   editForm.append(nameField, urlField, categoryField, actions, error);
 
-  // Save on submit (covers clicking Save and pressing Enter in a field).
   editForm.addEventListener("submit", (event) => {
     event.preventDefault();
     const newName = nameField.value.trim();
@@ -255,145 +280,99 @@ function buildEditForm(bookmark) {
     updateBookmark(bookmark.id, newName, newUrl, categoryField.value);
   });
 
-  // Escape cancels editing.
   editForm.addEventListener("keydown", (event) => {
     if (event.key === "Escape") cancelEdit();
   });
 
-  // Put the cursor in the name field once the form is on the page.
   queueMicrotask(() => nameField.focus());
 
   return editForm;
 }
 
-// Build one category group: a clickable heading that collapses/expands its
-// bookmarks (or a faint hint when the category is still empty). The count pill
-// stays visible even when collapsed, so you can see what's inside at a glance.
-//
-// `isCollapsed` controls the folded state. While a search is active the caller
-// forces groups open so matches are always visible.
-function buildGroup(id, title, bookmarks, isCollapsed) {
-  const group = document.createElement("section");
-  group.className = "group";
-  if (isCollapsed) group.classList.add("group--collapsed");
+// --- Rendering: content pane ----------------------------------------------
 
-  // The heading is a real <button> so it's keyboard-focusable and toggles on
-  // Enter/Space for free.
-  const heading = document.createElement("button");
-  heading.type = "button";
-  heading.className = "group__heading";
-  heading.setAttribute("aria-expanded", String(!isCollapsed));
+// Fill the content pane. Three modes:
+//   1. No folders yet  -> show the empty state, hide the add-bookmark form.
+//   2. Searching       -> show matches from every folder.
+//   3. A folder is open -> show that folder's bookmarks + the add form.
+function renderContent(categories) {
+  const bookmarks = loadBookmarks();
+  const searching = searchQuery !== "";
 
-  const chevron = document.createElement("span");
-  chevron.className = "group__chevron";
-  chevron.setAttribute("aria-hidden", "true");
-  chevron.textContent = "▸";
+  bookmarkList.innerHTML = "";
+  noResults.hidden = true;
+  emptyState.hidden = true;
 
-  const titleEl = document.createElement("span");
-  titleEl.className = "group__title";
-  titleEl.textContent = title;
-
-  const count = document.createElement("span");
-  count.className = "group__count";
-  count.textContent = bookmarks.length;
-
-  heading.append(chevron, titleEl, count);
-  heading.addEventListener("click", () => toggleCollapsed(id));
-  group.append(heading);
-
-  // The collapsible body. Skipped entirely when the group is folded.
-  if (!isCollapsed) {
-    if (bookmarks.length === 0) {
-      const hint = document.createElement("p");
-      hint.className = "group__empty";
-      hint.textContent = "No bookmarks here yet.";
-      group.append(hint);
-    } else {
-      const list = document.createElement("ul");
-      list.className = "list";
-      bookmarks.forEach((bookmark) => list.append(buildBookmarkItem(bookmark)));
-      group.append(list);
-    }
+  // 1. Nothing to show until at least one folder exists.
+  if (categories.length === 0) {
+    form.hidden = true;
+    contentCount.hidden = true;
+    contentTitle.textContent = "Bookmarks";
+    emptyState.hidden = false;
+    return;
   }
 
-  return group;
-}
+  // 2. Search mode: matches across every folder, add form hidden.
+  if (searching) {
+    form.hidden = true;
+    contentTitle.textContent = "Search results";
+    const matches = bookmarks.filter(matchesSearch);
+    contentCount.textContent = matches.length;
+    contentCount.hidden = false;
+    matches.forEach((b) => bookmarkList.append(buildBookmarkItem(b)));
+    noResults.hidden = matches.length > 0;
+    return;
+  }
 
-// Synthetic id for the catch-all "Uncategorized" group.
-const UNCATEGORIZED_ID = "__uncategorized__";
+  // 3. Folder mode: make sure a valid folder is selected, then show it.
+  const validIds = categories.map((c) => c.id);
+  if (!validIds.includes(selectedCategoryId)) {
+    selectedCategoryId = validIds[0];
+  }
+
+  form.hidden = false;
+  contentTitle.textContent = categoryName(selectedCategoryId);
+
+  const items = bookmarks.filter((b) => b.categoryId === selectedCategoryId);
+  contentCount.textContent = items.length;
+  contentCount.hidden = false;
+
+  if (items.length === 0) {
+    const hint = document.createElement("li");
+    hint.className = "group__empty";
+    hint.textContent = "No bookmarks here yet — add one above.";
+    bookmarkList.append(hint);
+  } else {
+    items.forEach((b) => bookmarkList.append(buildBookmarkItem(b)));
+  }
+}
 
 // Rebuild everything on screen from the saved data.
 function render() {
   const categories = loadCategories();
-  const bookmarks = loadBookmarks();
-  const collapsed = loadCollapsed();
-  const searching = searchQuery !== "";
-
-  populateCategorySelect(categories);
-  groupsEl.innerHTML = "";
-
-  // Nothing to group under until at least one category exists.
-  if (categories.length === 0) {
-    emptyState.style.display = "block";
-    toolbar.hidden = true;
-    noResults.hidden = true;
-    return;
-  }
-  emptyState.style.display = "none";
-  toolbar.hidden = false;
-
-  // Build the list of groups to show: one per category, plus a catch-all for
-  // orphaned bookmarks. While searching, only matching bookmarks are kept and
-  // empty groups are dropped so results stand out.
-  const knownIds = new Set(categories.map((c) => c.id));
-  const groups = categories.map((category) => ({
-    id: category.id,
-    title: category.name,
-    items: bookmarks.filter((b) => b.categoryId === category.id && matchesSearch(b)),
-  }));
-
-  const orphans = bookmarks.filter(
-    (b) => !knownIds.has(b.categoryId) && matchesSearch(b)
-  );
-  if (orphans.length > 0) {
-    groups.push({ id: UNCATEGORIZED_ID, title: "Uncategorized", items: orphans });
-  }
-
-  let shown = 0;
-  groups.forEach((g) => {
-    // While searching, hide groups with no matches and force the rest open.
-    if (searching && g.items.length === 0) return;
-    const isCollapsed = !searching && collapsed.has(g.id);
-    groupsEl.append(buildGroup(g.id, g.title, g.items, isCollapsed));
-    shown += 1;
-  });
-
-  // "No results" only applies while searching.
-  noResults.hidden = !(searching && shown === 0);
-
-  updateToggleAllLabel();
-}
-
-// The bulk button reads "Expand all" when everything is already collapsed,
-// otherwise "Collapse all".
-function updateToggleAllLabel() {
-  const categories = loadCategories();
-  const collapsed = loadCollapsed();
-  const allCollapsed =
-    categories.length > 0 && categories.every((c) => collapsed.has(c.id));
-  toggleAllBtn.textContent = allCollapsed ? "Expand all" : "Collapse all";
+  renderFolders(categories);
+  renderContent(categories);
 }
 
 // --- Actions --------------------------------------------------------------
+
+// Open a folder in the content pane. Clears any active search and, on mobile,
+// swaps the sidebar out for the content view.
+function selectCategory(id) {
+  selectedCategoryId = id;
+  searchQuery = "";
+  searchInput.value = "";
+  layout.classList.add("layout--show-content");
+  render();
+}
 
 function addCategory(name) {
   const categories = loadCategories();
   const newCategory = { id: Date.now().toString(), name: name };
   categories.push(newCategory);
   saveCategories(categories);
-  render();
-  // Select the just-created category so the next bookmark lands in it.
-  categorySelect.value = newCategory.id;
+  // Open the folder we just made so the next bookmark lands in it.
+  selectCategory(newCategory.id);
 }
 
 function addBookmark(name, url, categoryId) {
@@ -408,27 +387,24 @@ function addBookmark(name, url, categoryId) {
   render();
 }
 
-// Remove a bookmark by its id.
 function deleteBookmark(id) {
   const bookmarks = loadBookmarks().filter((b) => b.id !== id);
   saveBookmarks(bookmarks);
   render();
 }
 
-// Switch a bookmark's row into edit mode.
 function startEdit(id) {
   editingId = id;
   render();
 }
 
-// Leave edit mode without saving.
 function cancelEdit() {
   editingId = null;
   render();
 }
 
-// Save edited values back to the matching bookmark, keeping its id. The new
-// categoryId may differ, which moves the bookmark to another group.
+// Save edited values back to the matching bookmark, keeping its id. A new
+// categoryId moves the bookmark to another folder.
 function updateBookmark(id, name, url, categoryId) {
   const bookmarks = loadBookmarks().map((b) =>
     b.id === id ? { ...b, name: name, url: url, categoryId: categoryId } : b
@@ -446,7 +422,7 @@ categoryForm.addEventListener("submit", (event) => {
 
   const name = categoryInput.value.trim();
   if (!name) {
-    categoryError.textContent = "Please enter a category name.";
+    categoryError.textContent = "Please enter a folder name.";
     return;
   }
 
@@ -470,10 +446,9 @@ form.addEventListener("submit", (event) => {
 
   const name = nameInput.value.trim();
   const url = urlInput.value.trim();
-  const categoryId = categorySelect.value;
 
-  if (!categoryId) {
-    errorEl.textContent = "Create a category first, then pick it here.";
+  if (!selectedCategoryId || selectedCategoryId === UNCATEGORIZED_ID) {
+    errorEl.textContent = "Open a folder first, then add to it.";
     return;
   }
   if (!name || !url) {
@@ -481,34 +456,26 @@ form.addEventListener("submit", (event) => {
     return;
   }
 
-  addBookmark(name, url, categoryId);
+  addBookmark(name, url, selectedCategoryId);
 
-  // Clear name + link but keep the chosen category, so adding several
-  // bookmarks to the same category stays quick.
+  // Clear the fields but keep the folder open, so adding several bookmarks in
+  // a row stays quick.
   nameInput.value = "";
   urlInput.value = "";
   nameInput.focus();
 });
 
-// Filter as the user types. Empty input shows everything again.
+// Filter as the user types. A non-empty query switches the content pane into
+// search mode; clearing it returns to the open folder.
 searchInput.addEventListener("input", () => {
   searchQuery = searchInput.value.trim().toLowerCase();
+  if (searchQuery) layout.classList.add("layout--show-content");
   render();
 });
 
-// Collapse every category at once, or expand them all if they're already
-// collapsed. (Mirrors the label set by updateToggleAllLabel.)
-toggleAllBtn.addEventListener("click", () => {
-  const categories = loadCategories();
-  const collapsed = loadCollapsed();
-  const allCollapsed = categories.every((c) => collapsed.has(c.id));
-
-  if (allCollapsed) {
-    saveCollapsed(new Set());
-  } else {
-    saveCollapsed(new Set(categories.map((c) => c.id)));
-  }
-  render();
+// Mobile only: go back from a folder's contents to the folder list.
+backBtn.addEventListener("click", () => {
+  layout.classList.remove("layout--show-content");
 });
 
 // Show everything as soon as the page loads.
