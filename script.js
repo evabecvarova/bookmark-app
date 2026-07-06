@@ -100,6 +100,36 @@ function matchesSearch(bookmark) {
   );
 }
 
+// Put `text` into `container`, wrapping any parts that match the search query
+// in <mark> so they stand out. Built from text nodes (never innerHTML) so a
+// name or URL still can't inject HTML. With no query, it's just the plain text.
+function appendHighlighted(container, text, query) {
+  if (!query) {
+    container.textContent = text;
+    return;
+  }
+
+  const haystack = text.toLowerCase();
+  let from = 0;
+  let hit = haystack.indexOf(query, from);
+
+  while (hit !== -1) {
+    if (hit > from) {
+      container.append(document.createTextNode(text.slice(from, hit)));
+    }
+    const mark = document.createElement("mark");
+    mark.className = "hl";
+    mark.textContent = text.slice(hit, hit + query.length);
+    container.append(mark);
+    from = hit + query.length;
+    hit = haystack.indexOf(query, from);
+  }
+
+  if (from < text.length) {
+    container.append(document.createTextNode(text.slice(from)));
+  }
+}
+
 // The name of a folder for a given category id (or "Uncategorized").
 function categoryName(id) {
   if (id === UNCATEGORIZED_ID) return "Uncategorized";
@@ -172,7 +202,7 @@ function buildBookmarkItem(bookmark) {
   // Use textContent (never innerHTML) so a name/URL can't inject HTML.
   const name = document.createElement("span");
   name.className = "bookmark__name";
-  name.textContent = bookmark.name;
+  appendHighlighted(name, bookmark.name, searchQuery);
 
   const link = document.createElement("a");
   link.className = "bookmark__link";
@@ -180,7 +210,7 @@ function buildBookmarkItem(bookmark) {
   link.target = "_blank";
   link.rel = "noopener noreferrer";
   link.title = bookmark.url;
-  link.textContent = hostnameOf(bookmark.url);
+  appendHighlighted(link, hostnameOf(bookmark.url), searchQuery);
 
   info.append(name, link);
 

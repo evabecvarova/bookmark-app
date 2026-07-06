@@ -385,6 +385,14 @@ body {
   text-decoration: underline;
 }
 
+/* Highlighted search matches inside a bookmark's name or link. */
+.hl {
+  background: rgba(217, 119, 87, 0.22);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 1px;
+}
+
 /* A small "which folder" tag shown next to search results. */
 .bookmark__folder {
   flex-shrink: 0;
