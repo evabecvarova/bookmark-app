@@ -536,8 +536,10 @@ body {
 }
 
 /* Highlighted search matches inside a bookmark's name or link. */
+/* Inline highlight for matched text in search results — soft yellow (in step
+   with the yellow search field), never red. */
 .hl {
-  background: rgba(217, 119, 87, 0.22);
+  background: #fbeaa0;
   color: inherit;
   border-radius: 3px;
   padding: 0 1px;
