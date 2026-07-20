@@ -59,6 +59,11 @@ body {
   font-size: 1.6rem;
   font-weight: 600;
   letter-spacing: -0.01em;
+  cursor: pointer; /* clicking returns to GLOBAL */
+}
+
+.sidebar__title:hover {
+  color: var(--accent);
 }
 
 .sidebar__subtitle {
@@ -76,7 +81,9 @@ body {
   padding: 1.5rem;
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  /* 16px rhythm between right-panel sections (e.g. New subfolder ↔ Add
+     bookmark). The breadcrumb gets an extra 8px via .add-hint's margin. */
+  gap: 16px;
   min-width: 0; /* let long content shrink instead of overflowing the grid */
 }
 
@@ -99,6 +106,51 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Breadcrumb "GLOBAL / Unsorted" — always visible, neutral (white bg, grey
+   text), never red. */
+.breadcrumb {
+  display: flex;
+  align-items: baseline;
+  gap: 0;
+  color: var(--text);
+}
+
+.crumb__sep {
+  color: var(--text-muted);
+  font-weight: 400;
+  padding: 0 0.15rem;
+}
+
+/* The second segment (Unsorted / Subfolder) sits back in calm grey. */
+.crumb--sub {
+  color: #777;
+}
+
+/* A breadcrumb segment you can click to step up a level. */
+.crumb--link {
+  cursor: pointer;
+}
+
+.crumb--link:hover {
+  text-decoration: underline;
+}
+
+/* Context-aware helper text under the breadcrumb (where a new bookmark lands).
+   Small, grey, never red. The 8px on top of the 16px section gap makes the
+   space under the breadcrumb total 24px. */
+.add-hint {
+  color: #777;
+  font-size: 0.85rem;
+  margin-top: 8px;
+}
+
+/* Rename/Delete buttons for the open subfolder. */
+.subfolder-actions {
+  display: inline-flex;
+  gap: 0.4rem;
+  flex-shrink: 0;
 }
 
 /* The mobile-only "back to folders" button; hidden on desktop. */
@@ -175,6 +227,37 @@ body {
   min-height: 1.1em;
 }
 
+/* --- Global search: a distinct yellow so "search" never looks like the
+       "create" forms (which use the coral accent). --- */
+.search {
+  background: #fff7c2;
+  border-color: #e6d98a;
+}
+
+.search::placeholder {
+  color: #9a8f4e;
+}
+
+.search:focus {
+  background: #fffdf0;
+  border-color: #e6d98a;
+  box-shadow: 0 0 0 3px rgba(230, 217, 138, 0.5);
+}
+
+/* The add-bookmark form is the "create" surface — a soft coral tint keeps it
+   visually apart from the yellow search, everywhere it appears. */
+.form--create {
+  background: rgba(217, 119, 87, 0.05);
+  border: 1px solid rgba(217, 119, 87, 0.18);
+  border-radius: 12px;
+  padding: 1rem;
+}
+
+/* The add-bookmark submit sits on the right, matching the "buttons right" rule. */
+.form--create .btn--primary {
+  align-self: flex-end;
+}
+
 /* --- Buttons --- */
 .btn {
   border: none;
@@ -213,9 +296,11 @@ body {
   color: var(--text);
 }
 
+/* Calm by default (grey, no red); only warms to red on hover so the resting
+   UI stays neutral. */
 .btn--danger {
   background: transparent;
-  color: #b91c1c;
+  color: var(--text-muted);
   border: 1px solid var(--border);
   padding: 0.45rem 0.7rem;
   font-size: 0.85rem;
@@ -271,6 +356,67 @@ body {
   white-space: nowrap;
 }
 
+/* The "📁 X • 📄 Y" summary is wider than a plain count pill — let it size to
+   its text instead of the fixed count width. */
+.folder__summary {
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Subfolders shown indented under an open folder in the sidebar. */
+.subfolders {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin: 0.15rem 0 0.35rem 0.6rem;
+  padding-left: 0.5rem;
+  border-left: 1px solid var(--border);
+}
+
+/* A subfolder row (sidebar and content picker). Lighter than a folder row. */
+.subfolder {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 8px;
+  padding: 0.4rem 0.6rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.subfolder:hover {
+  background: var(--bg);
+  color: var(--text);
+}
+
+.subfolder--active {
+  background: var(--bg);
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* Content-pane subfolder chooser (shown when a folder has no subfolder open). */
+.subfolder-picker {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.4rem;
+}
+
+.subfolder-picker .subfolder {
+  color: var(--text);
+}
+
 /* Small count pill, shared by folders and the content header. */
 .group__count {
   font-size: 0.75rem;
@@ -298,15 +444,16 @@ body {
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: 12px; /* space between bookmark items */
 }
 
-/* Compact rows: favicon + name + hostname share a single line. */
+/* Compact rows: favicon + name + hostname share a single line. Text sits left,
+   action buttons sit right. */
 .bookmark {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.7rem;
+  gap: 8px; /* space inside a bookmark item */
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -332,14 +479,17 @@ body {
   flex: 1 1 auto;
   display: flex;
   align-items: baseline;
-  gap: 0.5rem;
+  gap: 8px;
+  text-align: left;
 }
 
+/* Action buttons pinned to the right of each item. */
 .bookmark__actions {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 8px;
   flex-shrink: 0;
+  margin-left: auto;
 }
 
 /* Inline edit form that replaces a bookmark row while editing. */
@@ -393,14 +543,26 @@ body {
   padding: 0 1px;
 }
 
-/* A small "which folder" tag shown next to search results. */
+/* Search results: flat, neutral cards with light grey borders — no shadow,
+   no red — so results read as a calm, scannable list. */
+.bookmark--search {
+  border-color: #e0e0e0;
+  box-shadow: none;
+}
+
+.bookmark--search:hover {
+  transform: none;
+  border-color: #d0d0d0;
+}
+
+/* A small "Folder / Subfolder" path tag shown next to each search result. */
 .bookmark__folder {
   flex-shrink: 0;
   font-size: 0.7rem;
   font-weight: 600;
-  color: var(--text-muted);
+  color: #999;
   background: var(--bg);
-  border: 1px solid var(--border);
+  border: 1px solid #e0e0e0;
   border-radius: 999px;
   padding: 0.05rem 0.5rem;
 }

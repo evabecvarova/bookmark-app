@@ -1,13 +1,25 @@
-// Bookmark app — stores bookmarks AND folders in localStorage (no server).
+// Bookmark app — stores folders, subfolders AND bookmarks in localStorage
+// (no server).
 //
-// Layout is two panes: a sidebar listing every folder, and a content pane that
-// shows the *selected* folder's bookmarks (or search matches across folders).
+// Hierarchy (exactly one level of subfolders):
+//     Folder  →  Subfolder  →  Bookmark
+//
+// Layout is two panes: a sidebar listing every folder (and, when a folder is
+// open, its subfolders), and a content pane that shows the *selected*
+// subfolder's bookmarks (or search matches across everything).
+//
+// Storage stays backward-compatible: bookmarks are a flat list keyed by
+// `categoryId` (folder) and an optional `subfolderId`. A bookmark with no
+// `subfolderId` is "loose" and shows under an auto-generated "Unsorted"
+// subfolder — so nothing saved before subfolders existed is ever lost.
 
 const STORAGE_KEY = "bookmarks";
 const CATEGORIES_KEY = "categories";
+const SUBFOLDERS_KEY = "subfolders";
 
-// Synthetic id for the catch-all "Uncategorized" folder (orphaned bookmarks).
-const UNCATEGORIZED_ID = "__uncategorized__";
+// Synthetic id for the auto-generated "Unsorted" subfolder (loose bookmarks
+// inside a folder that aren't in a real subfolder).
+const UNSORTED_ID = "__unsorted__";
 
 // --- Elements -------------------------------------------------------------
 
@@ -15,22 +27,36 @@ const categoryForm = document.getElementById("category-form");
 const categoryInput = document.getElementById("category-input");
 const categoryError = document.getElementById("category-error");
 
+const subfolderForm = document.getElementById("subfolder-form");
+const subfolderInput = document.getElementById("subfolder-input");
+const subfolderError = document.getElementById("subfolder-error");
+
 const form = document.getElementById("bookmark-form");
 const nameInput = document.getElementById("name-input");
 const urlInput = document.getElementById("url-input");
+const bkFolder = document.getElementById("bk-folder");
+const bkSub = document.getElementById("bk-sub");
 const errorEl = document.getElementById("form-error");
 
 const folderList = document.getElementById("folder-list");
 const bookmarkList = document.getElementById("bookmark-list");
-const contentTitle = document.getElementById("content-title");
+const breadcrumb = document.getElementById("breadcrumb");
 const contentCount = document.getElementById("content-count");
+
+const addHint = document.getElementById("add-hint");
+const homeLink = document.getElementById("home-link");
 
 const emptyState = document.getElementById("empty-state");
 const noResults = document.getElementById("no-results");
+const pickSubfolder = document.getElementById("pick-subfolder");
 
 const searchInput = document.getElementById("search-input");
 const backBtn = document.getElementById("back-btn");
 const layout = document.getElementById("layout");
+
+const subfolderActions = document.getElementById("subfolder-actions");
+const renameSubfolderBtn = document.getElementById("rename-subfolder");
+const deleteSubfolderBtn = document.getElementById("delete-subfolder");
 
 // Which bookmark is currently being edited (null = none).
 let editingId = null;
@@ -38,9 +64,11 @@ let editingId = null;
 // The current search text (lower-cased). Empty string means "not searching".
 let searchQuery = "";
 
-// Which folder is open in the content pane (a category id, UNCATEGORIZED_ID,
-// or null when nothing is selected yet).
+// Which folder is open (a category id, or null for the GLOBAL top level).
 let selectedCategoryId = null;
+// Which subfolder is open (a subfolder id, UNSORTED_ID, or null when only a
+// folder is selected).
+let selectedSubfolderId = null;
 
 // --- Data helpers ---------------------------------------------------------
 
@@ -60,6 +88,15 @@ function loadCategories() {
 
 function saveCategories(categories) {
   localStorage.setItem(CATEGORIES_KEY, JSON.stringify(categories));
+}
+
+function loadSubfolders() {
+  const raw = localStorage.getItem(SUBFOLDERS_KEY);
+  return raw ? JSON.parse(raw) : [];
+}
+
+function saveSubfolders(subfolders) {
+  localStorage.setItem(SUBFOLDERS_KEY, JSON.stringify(subfolders));
 }
 
 // --- Small utilities ------------------------------------------------------
@@ -91,13 +128,76 @@ function buildFavicon(url) {
   return img;
 }
 
-// Does a bookmark match the current search text? Matches on name or URL.
+// The name of a folder for a given category id. A null/unknown folder means
+// the bookmark lives at the top level → "GLOBAL".
+function categoryName(id) {
+  if (!id) return "GLOBAL";
+  const category = loadCategories().find((c) => c.id === id);
+  return category ? category.name : "GLOBAL";
+}
+
+// Bookmarks that belong to no folder: added directly at GLOBAL, or orphaned
+// because their folder was deleted. Both live in GLOBAL / Unsorted.
+function globalUnsortedBookmarks() {
+  const knownFolderIds = new Set(loadCategories().map((c) => c.id));
+  return loadBookmarks().filter(
+    (b) => !b.categoryId || !knownFolderIds.has(b.categoryId)
+  );
+}
+
+// The name of a subfolder for a given id ("Unsorted" for loose bookmarks).
+function subfolderName(id) {
+  if (!id || id === UNSORTED_ID) return "Unsorted";
+  const sub = loadSubfolders().find((s) => s.id === id);
+  return sub ? sub.name : "Unsorted";
+}
+
+// Real subfolders that belong to a folder.
+function subfoldersOf(categoryId) {
+  return loadSubfolders().filter((s) => s.categoryId === categoryId);
+}
+
+// A bookmark is "loose" if it has no subfolderId, or points at a subfolder
+// that no longer exists — either way it belongs in "Unsorted".
+function isLoose(bookmark, knownSubIds) {
+  return !bookmark.subfolderId || !knownSubIds.has(bookmark.subfolderId);
+}
+
+// The bookmarks inside one subfolder of a folder. Passing UNSORTED_ID returns
+// the loose bookmarks of that folder.
+function bookmarksInSubfolder(categoryId, subfolderId) {
+  const knownSubIds = new Set(subfoldersOf(categoryId).map((s) => s.id));
+  return loadBookmarks().filter((b) => {
+    if (b.categoryId !== categoryId) return false;
+    if (subfolderId === UNSORTED_ID) return isLoose(b, knownSubIds);
+    return b.subfolderId === subfolderId;
+  });
+}
+
+// Does a folder have any loose bookmarks (→ needs an "Unsorted" subfolder)?
+function hasLooseBookmarks(categoryId) {
+  const knownSubIds = new Set(subfoldersOf(categoryId).map((s) => s.id));
+  return loadBookmarks().some(
+    (b) => b.categoryId === categoryId && isLoose(b, knownSubIds)
+  );
+}
+
+// --- Search ---------------------------------------------------------------
+
+// Global search: a bookmark matches if the query appears in its name, its URL,
+// its folder name, or its subfolder name.
 function matchesSearch(bookmark) {
   if (!searchQuery) return true;
-  return (
-    bookmark.name.toLowerCase().includes(searchQuery) ||
-    bookmark.url.toLowerCase().includes(searchQuery)
-  );
+  const knownSubIds = new Set(subfoldersOf(bookmark.categoryId).map((s) => s.id));
+  const sub = isLoose(bookmark, knownSubIds)
+    ? "Unsorted"
+    : subfolderName(bookmark.subfolderId);
+  return [
+    bookmark.name,
+    bookmark.url,
+    categoryName(bookmark.categoryId),
+    sub,
+  ].some((text) => text.toLowerCase().includes(searchQuery));
 }
 
 // Put `text` into `container`, wrapping any parts that match the search query
@@ -130,17 +230,11 @@ function appendHighlighted(container, text, query) {
   }
 }
 
-// The name of a folder for a given category id (or "Uncategorized").
-function categoryName(id) {
-  if (id === UNCATEGORIZED_ID) return "Uncategorized";
-  const category = loadCategories().find((c) => c.id === id);
-  return category ? category.name : "Uncategorized";
-}
-
 // --- Rendering: sidebar folder list ---------------------------------------
 
-// Build one clickable folder row for the sidebar.
-function buildFolderButton(id, name, count) {
+// Build one clickable folder row for the sidebar, labelled with the icon
+// summary "📁 X • 📄 Y" (subfolders • total bookmarks).
+function buildFolderButton(id, name, subCount, docCount) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "folder";
@@ -153,32 +247,84 @@ function buildFolderButton(id, name, count) {
   nameEl.textContent = name;
 
   const countEl = document.createElement("span");
-  countEl.className = "group__count";
-  countEl.textContent = count;
+  countEl.className = "group__count folder__summary";
+  countEl.textContent = `📁 ${subCount} • 📄 ${docCount}`;
 
   button.append(nameEl, countEl);
   button.addEventListener("click", () => selectCategory(id));
   return button;
 }
 
-// Draw the sidebar: one entry per folder, plus a catch-all "Uncategorized"
-// entry when orphaned bookmarks exist.
+// Build one clickable subfolder row (used in the sidebar under an open folder,
+// and in the content pane when a folder has no subfolder selected yet).
+function buildSubfolderButton(categoryId, id, name) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "subfolder";
+  if (
+    categoryId === selectedCategoryId &&
+    id === selectedSubfolderId &&
+    !searchQuery
+  ) {
+    button.classList.add("subfolder--active");
+  }
+
+  const nameEl = document.createElement("span");
+  nameEl.className = "folder__name";
+  nameEl.textContent = name;
+
+  const countEl = document.createElement("span");
+  countEl.className = "group__count";
+  countEl.textContent = bookmarksInSubfolder(categoryId, id).length;
+
+  button.append(nameEl, countEl);
+  button.addEventListener("click", () => selectSubfolder(categoryId, id));
+  return button;
+}
+
+// The list of subfolder rows for a folder: every real subfolder, plus an
+// "Unsorted" row when the folder has loose bookmarks.
+function subfolderRows(categoryId) {
+  const rows = subfoldersOf(categoryId).map((s) =>
+    buildSubfolderButton(categoryId, s.id, s.name)
+  );
+  if (hasLooseBookmarks(categoryId)) {
+    rows.push(buildSubfolderButton(categoryId, UNSORTED_ID, "Unsorted"));
+  }
+  return rows;
+}
+
+// How many subfolder rows a folder shows (real subfolders + Unsorted if any).
+function subfolderCount(categoryId) {
+  return subfoldersOf(categoryId).length + (hasLooseBookmarks(categoryId) ? 1 : 0);
+}
+
+// Draw the sidebar: one entry per folder (with its icon summary), and — under
+// the open folder — its subfolders. GLOBAL is never a row here; it's simply the
+// state when no folder is selected.
 function renderFolders(categories) {
   const bookmarks = loadBookmarks();
   folderList.innerHTML = "";
 
   categories.forEach((category) => {
-    const count = bookmarks.filter((b) => b.categoryId === category.id).length;
-    folderList.append(buildFolderButton(category.id, category.name, count));
-  });
-
-  const knownIds = new Set(categories.map((c) => c.id));
-  const orphanCount = bookmarks.filter((b) => !knownIds.has(b.categoryId)).length;
-  if (orphanCount > 0) {
+    const docCount = bookmarks.filter((b) => b.categoryId === category.id).length;
     folderList.append(
-      buildFolderButton(UNCATEGORIZED_ID, "Uncategorized", orphanCount)
+      buildFolderButton(
+        category.id,
+        category.name,
+        subfolderCount(category.id),
+        docCount
+      )
     );
-  }
+
+    // Expand the open folder's subfolders right below it.
+    if (category.id === selectedCategoryId && !searchQuery) {
+      const group = document.createElement("div");
+      group.className = "subfolders";
+      subfolderRows(category.id).forEach((row) => group.append(row));
+      folderList.append(group);
+    }
+  });
 }
 
 // --- Rendering: bookmark rows ---------------------------------------------
@@ -188,6 +334,8 @@ function renderFolders(categories) {
 function buildBookmarkItem(bookmark) {
   const li = document.createElement("li");
   li.className = "bookmark";
+  // Search results get a flatter, neutral look (light grey borders, grey tags).
+  if (searchQuery) li.classList.add("bookmark--search");
 
   if (bookmark.id === editingId) {
     li.append(buildEditForm(bookmark));
@@ -214,11 +362,17 @@ function buildBookmarkItem(bookmark) {
 
   info.append(name, link);
 
-  // While searching, show which folder each match lives in.
+  // While searching, show the full "Folder / Subfolder" path of each match.
   if (searchQuery) {
+    const knownSubIds = new Set(
+      subfoldersOf(bookmark.categoryId).map((s) => s.id)
+    );
+    const sub = isLoose(bookmark, knownSubIds)
+      ? "Unsorted"
+      : subfolderName(bookmark.subfolderId);
     const tag = document.createElement("span");
     tag.className = "bookmark__folder";
-    tag.textContent = categoryName(bookmark.categoryId);
+    tag.textContent = `${categoryName(bookmark.categoryId)} / ${sub}`;
     info.append(tag);
   }
 
@@ -247,7 +401,8 @@ function buildBookmarkItem(bookmark) {
 }
 
 // Build the inline edit form shown in place of a bookmark while editing.
-// Lets you change the name, link, and folder. Enter saves, Escape cancels.
+// Lets you change the name, link, folder, and subfolder. Enter saves,
+// Escape cancels.
 function buildEditForm(bookmark) {
   const editForm = document.createElement("form");
   editForm.className = "bookmark__edit";
@@ -277,6 +432,31 @@ function buildEditForm(bookmark) {
   });
   categoryField.value = bookmark.categoryId;
 
+  // Subfolder picker, rebuilt whenever the folder changes. An empty value
+  // means "Unsorted" (a loose bookmark).
+  const subfolderField = document.createElement("select");
+  subfolderField.className = "input";
+  subfolderField.setAttribute("aria-label", "Edit subfolder");
+
+  function fillSubfolders(categoryId, selected) {
+    subfolderField.innerHTML = "";
+    const unsorted = document.createElement("option");
+    unsorted.value = "";
+    unsorted.textContent = "Unsorted";
+    subfolderField.append(unsorted);
+    subfoldersOf(categoryId).forEach((s) => {
+      const option = document.createElement("option");
+      option.value = s.id;
+      option.textContent = s.name;
+      subfolderField.append(option);
+    });
+    subfolderField.value = selected || "";
+  }
+  fillSubfolders(bookmark.categoryId, bookmark.subfolderId);
+  categoryField.addEventListener("change", () => {
+    fillSubfolders(categoryField.value, "");
+  });
+
   const error = document.createElement("p");
   error.className = "form__error";
 
@@ -295,7 +475,7 @@ function buildEditForm(bookmark) {
   cancelBtn.addEventListener("click", cancelEdit);
 
   actions.append(saveBtn, cancelBtn);
-  editForm.append(nameField, urlField, categoryField, actions, error);
+  editForm.append(nameField, urlField, categoryField, subfolderField, actions, error);
 
   editForm.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -307,7 +487,13 @@ function buildEditForm(bookmark) {
       return;
     }
 
-    updateBookmark(bookmark.id, newName, newUrl, categoryField.value);
+    updateBookmark(
+      bookmark.id,
+      newName,
+      newUrl,
+      categoryField.value,
+      subfolderField.value || null
+    );
   });
 
   editForm.addEventListener("keydown", (event) => {
@@ -321,60 +507,246 @@ function buildEditForm(bookmark) {
 
 // --- Rendering: content pane ----------------------------------------------
 
-// Fill the content pane. Three modes:
-//   1. No folders yet  -> show the empty state, hide the add-bookmark form.
-//   2. Searching       -> show matches from every folder.
-//   3. A folder is open -> show that folder's bookmarks + the add form.
+// Build one breadcrumb segment. When `onClick` is given the segment is a
+// clickable link (used to step "up" a level); otherwise it's plain text.
+function buildCrumb(text, className, onClick) {
+  const el = document.createElement("span");
+  el.className = className;
+  el.textContent = text;
+  if (onClick) {
+    el.classList.add("crumb--link");
+    el.setAttribute("role", "button");
+    el.setAttribute("tabindex", "0");
+    el.addEventListener("click", onClick);
+    el.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        onClick();
+      }
+    });
+  }
+  return el;
+}
+
+function appendSeparator() {
+  const sep = document.createElement("span");
+  sep.className = "crumb__sep";
+  sep.textContent = " / ";
+  breadcrumb.append(sep);
+}
+
+// Breadcrumb formats (always visible, neutral styling):
+//   Search results
+//   GLOBAL / Unsorted
+//   FolderName / Unsorted
+//   FolderName / SubfolderName
+function renderBreadcrumb() {
+  breadcrumb.innerHTML = "";
+
+  if (searchQuery) {
+    breadcrumb.append(buildCrumb("Search results", "crumb"));
+    return;
+  }
+
+  // GLOBAL context (no folder selected).
+  if (selectedCategoryId === null) {
+    breadcrumb.append(buildCrumb("GLOBAL", "crumb"));
+    appendSeparator();
+    breadcrumb.append(buildCrumb("Unsorted", "crumb crumb--sub"));
+    return;
+  }
+
+  const inRealSubfolder =
+    selectedSubfolderId !== null && selectedSubfolderId !== UNSORTED_ID;
+
+  // Folder name — clickable to step up to the folder's Unsorted when we're
+  // currently deeper (inside a real subfolder).
+  breadcrumb.append(
+    buildCrumb(
+      categoryName(selectedCategoryId),
+      "crumb",
+      inRealSubfolder ? () => selectCategory(selectedCategoryId) : null
+    )
+  );
+  appendSeparator();
+  breadcrumb.append(
+    buildCrumb(
+      inRealSubfolder ? subfolderName(selectedSubfolderId) : "Unsorted",
+      "crumb crumb--sub"
+    )
+  );
+}
+
+// Fill the add-bookmark form's Subfolder picker for a given folder. "" is the
+// folder's Unsorted (and the only option when the folder is Global).
+function fillBookmarkSubfolders(folderId, selected) {
+  bkSub.innerHTML = "";
+  const unsorted = document.createElement("option");
+  unsorted.value = "";
+  unsorted.textContent = "Unsorted";
+  bkSub.append(unsorted);
+  if (folderId) {
+    subfoldersOf(folderId).forEach((s) => {
+      const option = document.createElement("option");
+      option.value = s.id;
+      option.textContent = s.name;
+      bkSub.append(option);
+    });
+  }
+  bkSub.value = selected || "";
+  // Global has no subfolders, so there's nothing to choose.
+  bkSub.disabled = !folderId;
+}
+
+// Populate the add-bookmark form's Folder + Subfolder pickers, defaulting to
+// the current context so "just add it here" needs no extra clicks.
+function populateAddForm() {
+  bkFolder.innerHTML = "";
+  const globalOpt = document.createElement("option");
+  globalOpt.value = "";
+  globalOpt.textContent = "Global (no folder)";
+  bkFolder.append(globalOpt);
+  loadCategories().forEach((c) => {
+    const option = document.createElement("option");
+    option.value = c.id;
+    option.textContent = c.name;
+    bkFolder.append(option);
+  });
+
+  const defaultFolder = selectedCategoryId || "";
+  bkFolder.value = defaultFolder;
+
+  const inRealSubfolder =
+    selectedSubfolderId !== null && selectedSubfolderId !== UNSORTED_ID;
+  fillBookmarkSubfolders(defaultFolder, inRealSubfolder ? selectedSubfolderId : "");
+
+  updateAddHint();
+}
+
+// Keep the grey helper text in step with the form's chosen destination.
+function updateAddHint() {
+  const folder = bkFolder.value;
+  const sub = bkSub.value;
+  let text;
+  if (!folder) {
+    text = "Bookmark will be added to Global Unsorted.";
+  } else if (!sub) {
+    text = `Bookmark will be added to ${categoryName(folder)} / Unsorted.`;
+  } else {
+    text = `Bookmark will be added to ${categoryName(folder)} / ${subfolderName(sub)}.`;
+  }
+  addHint.textContent = text;
+  addHint.hidden = false;
+}
+
+// Show the count pill with a value.
+function showCount(n) {
+  contentCount.textContent = n;
+  contentCount.hidden = false;
+}
+
+// Render a list of bookmarks, or a calm hint when there are none.
+function renderBookmarkItems(items, emptyText) {
+  if (items.length === 0) {
+    const hint = document.createElement("li");
+    hint.className = "group__empty";
+    hint.textContent = emptyText;
+    bookmarkList.append(hint);
+  } else {
+    items.forEach((b) => bookmarkList.append(buildBookmarkItem(b)));
+  }
+}
+
+// Fill the content pane. Contexts (right-panel order is always:
+// breadcrumb → helper text → new subfolder → add bookmark → subfolders →
+// bookmarks):
+//   Search  -> global matches; no forms.
+//   GLOBAL  -> Global Unsorted bookmarks + add bookmark (no subfolders).
+//   Folder  -> folder's Unsorted: add subfolder + add bookmark + subfolder
+//              list + the folder's loose bookmarks.
+//   Subfolder -> that subfolder's bookmarks + add bookmark.
 function renderContent(categories) {
-  const bookmarks = loadBookmarks();
   const searching = searchQuery !== "";
 
   bookmarkList.innerHTML = "";
   noResults.hidden = true;
   emptyState.hidden = true;
+  pickSubfolder.hidden = true;
+  subfolderForm.hidden = true;
+  form.hidden = true;
+  contentCount.hidden = true;
+  addHint.hidden = true;
 
-  // 1. Nothing to show until at least one folder exists.
-  if (categories.length === 0) {
-    form.hidden = true;
-    contentCount.hidden = true;
-    contentTitle.textContent = "Bookmarks";
-    emptyState.hidden = false;
-    return;
-  }
+  const inRealSubfolder =
+    !searching &&
+    selectedCategoryId !== null &&
+    selectedSubfolderId !== null &&
+    selectedSubfolderId !== UNSORTED_ID;
+  // Rename/Delete only make sense for a real (non-Unsorted) open subfolder.
+  subfolderActions.hidden = !inRealSubfolder;
 
-  // 2. Search mode: matches across every folder, add form hidden.
+  renderBreadcrumb();
+
+  // CASE D — Search results. Global, read-only (no adding from here).
   if (searching) {
-    form.hidden = true;
-    contentTitle.textContent = "Search results";
-    const matches = bookmarks.filter(matchesSearch);
-    contentCount.textContent = matches.length;
-    contentCount.hidden = false;
+    addHint.textContent =
+      "No new bookmarks can be added here. Select a folder or GLOBAL.";
+    addHint.hidden = false;
+    const matches = loadBookmarks().filter(matchesSearch);
+    showCount(matches.length);
     matches.forEach((b) => bookmarkList.append(buildBookmarkItem(b)));
     noResults.hidden = matches.length > 0;
     return;
   }
 
-  // 3. Folder mode: make sure a valid folder is selected, then show it.
-  const validIds = categories.map((c) => c.id);
-  if (!validIds.includes(selectedCategoryId)) {
-    selectedCategoryId = validIds[0];
+  // CASE C — GLOBAL (no folder selected). Add goes to Global Unsorted; GLOBAL
+  // has no subfolders.
+  if (selectedCategoryId === null) {
+    form.hidden = false;
+    populateAddForm();
+    const items = globalUnsortedBookmarks();
+    showCount(items.length);
+    renderBookmarkItems(
+      items,
+      "No global bookmarks yet — add one above, or open a folder."
+    );
+    return;
   }
 
+  // CASE B — A folder is open (this is its Unsorted view).
+  if (!inRealSubfolder) {
+    form.hidden = false;
+    subfolderForm.hidden = false;
+    populateAddForm();
+
+    // Section 5 — list of (real) subfolders to open.
+    const subs = subfoldersOf(selectedCategoryId);
+    if (subs.length > 0) {
+      const group = document.createElement("li");
+      group.className = "subfolder-picker";
+      subs.forEach((s) =>
+        group.append(buildSubfolderButton(selectedCategoryId, s.id, s.name))
+      );
+      bookmarkList.append(group);
+    }
+
+    // Section 6 — the folder's Unsorted (loose) bookmarks.
+    const items = bookmarksInSubfolder(selectedCategoryId, UNSORTED_ID);
+    showCount(items.length);
+    if (items.length === 0 && subs.length === 0) {
+      renderBookmarkItems([], "No subfolders or bookmarks yet — add one above.");
+    } else {
+      items.forEach((b) => bookmarkList.append(buildBookmarkItem(b)));
+    }
+    return;
+  }
+
+  // CASE A — A real subfolder is open.
   form.hidden = false;
-  contentTitle.textContent = categoryName(selectedCategoryId);
-
-  const items = bookmarks.filter((b) => b.categoryId === selectedCategoryId);
-  contentCount.textContent = items.length;
-  contentCount.hidden = false;
-
-  if (items.length === 0) {
-    const hint = document.createElement("li");
-    hint.className = "group__empty";
-    hint.textContent = "No bookmarks here yet — add one above.";
-    bookmarkList.append(hint);
-  } else {
-    items.forEach((b) => bookmarkList.append(buildBookmarkItem(b)));
-  }
+  populateAddForm();
+  const items = bookmarksInSubfolder(selectedCategoryId, selectedSubfolderId);
+  showCount(items.length);
+  renderBookmarkItems(items, "No bookmarks here yet — add one above.");
 }
 
 // Rebuild everything on screen from the saved data.
@@ -386,10 +758,32 @@ function render() {
 
 // --- Actions --------------------------------------------------------------
 
-// Open a folder in the content pane. Clears any active search and, on mobile,
-// swaps the sidebar out for the content view.
+// Open a folder: clears any search and shows its subfolders. On mobile, swaps
+// the sidebar out for the content view.
 function selectCategory(id) {
   selectedCategoryId = id;
+  selectedSubfolderId = null;
+  searchQuery = "";
+  searchInput.value = "";
+  layout.classList.add("layout--show-content");
+  render();
+}
+
+// Return to the GLOBAL top level (no folder selected). This is the app's
+// default state and the home for Global Unsorted bookmarks.
+function goGlobal() {
+  selectedCategoryId = null;
+  selectedSubfolderId = null;
+  searchQuery = "";
+  searchInput.value = "";
+  layout.classList.add("layout--show-content");
+  render();
+}
+
+// Open a subfolder: its bookmarks (and the add-bookmark form) appear.
+function selectSubfolder(categoryId, subfolderId) {
+  selectedCategoryId = categoryId;
+  selectedSubfolderId = subfolderId;
   searchQuery = "";
   searchInput.value = "";
   layout.classList.add("layout--show-content");
@@ -401,17 +795,50 @@ function addCategory(name) {
   const newCategory = { id: Date.now().toString(), name: name };
   categories.push(newCategory);
   saveCategories(categories);
-  // Open the folder we just made so the next bookmark lands in it.
+  // Open the folder we just made so the next step is adding a subfolder.
   selectCategory(newCategory.id);
 }
 
-function addBookmark(name, url, categoryId) {
+function addSubfolder(categoryId, name) {
+  const subfolders = loadSubfolders();
+  const newSub = { id: Date.now().toString(), name: name, categoryId: categoryId };
+  subfolders.push(newSub);
+  saveSubfolders(subfolders);
+  // Open the subfolder we just made so the next bookmark lands in it.
+  selectSubfolder(categoryId, newSub.id);
+}
+
+function renameSubfolder(id, name) {
+  const subfolders = loadSubfolders().map((s) =>
+    s.id === id ? { ...s, name: name } : s
+  );
+  saveSubfolders(subfolders);
+  render();
+}
+
+// Delete a subfolder but KEEP its bookmarks — they become loose and show up
+// under "Unsorted", so nothing is ever lost.
+function deleteSubfolder(id) {
+  const target = loadSubfolders().find((s) => s.id === id);
+  saveSubfolders(loadSubfolders().filter((s) => s.id !== id));
+  const bookmarks = loadBookmarks().map((b) =>
+    b.subfolderId === id ? { ...b, subfolderId: null } : b
+  );
+  saveBookmarks(bookmarks);
+  // Fall back to just the folder view.
+  if (target) selectedCategoryId = target.categoryId;
+  selectedSubfolderId = null;
+  render();
+}
+
+function addBookmark(name, url, categoryId, subfolderId) {
   const bookmarks = loadBookmarks();
   bookmarks.push({
     id: Date.now().toString(),
     name: name,
     url: url,
     categoryId: categoryId,
+    subfolderId: subfolderId,
   });
   saveBookmarks(bookmarks);
   render();
@@ -433,11 +860,14 @@ function cancelEdit() {
   render();
 }
 
-// Save edited values back to the matching bookmark, keeping its id. A new
-// categoryId moves the bookmark to another folder.
-function updateBookmark(id, name, url, categoryId) {
+// Save edited values back to the matching bookmark, keeping its id. Changing
+// the folder or subfolder moves the bookmark; a null subfolderId makes it a
+// loose ("Unsorted") bookmark.
+function updateBookmark(id, name, url, categoryId, subfolderId) {
   const bookmarks = loadBookmarks().map((b) =>
-    b.id === id ? { ...b, name: name, url: url, categoryId: categoryId } : b
+    b.id === id
+      ? { ...b, name: name, url: url, categoryId: categoryId, subfolderId: subfolderId }
+      : b
   );
   saveBookmarks(bookmarks);
   editingId = null;
@@ -470,6 +900,38 @@ categoryForm.addEventListener("submit", (event) => {
   categoryInput.focus();
 });
 
+subfolderForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  subfolderError.textContent = "";
+
+  if (!selectedCategoryId) {
+    subfolderError.textContent = "Open a folder first.";
+    return;
+  }
+
+  const name = subfolderInput.value.trim();
+  if (!name) {
+    subfolderError.textContent = "Please enter a subfolder name.";
+    return;
+  }
+  if (name.toLowerCase() === "unsorted") {
+    subfolderError.textContent = "“Unsorted” is reserved for loose links.";
+    return;
+  }
+
+  // Reject duplicates within the same folder.
+  const exists = subfoldersOf(selectedCategoryId).some(
+    (s) => s.name.toLowerCase() === name.toLowerCase()
+  );
+  if (exists) {
+    subfolderError.textContent = `"${name}" already exists here.`;
+    return;
+  }
+
+  addSubfolder(selectedCategoryId, name);
+  subfolderForm.reset();
+});
+
 form.addEventListener("submit", (event) => {
   event.preventDefault();
   errorEl.textContent = "";
@@ -477,30 +939,87 @@ form.addEventListener("submit", (event) => {
   const name = nameInput.value.trim();
   const url = urlInput.value.trim();
 
-  if (!selectedCategoryId || selectedCategoryId === UNCATEGORIZED_ID) {
-    errorEl.textContent = "Open a folder first, then add to it.";
-    return;
-  }
   if (!name || !url) {
     errorEl.textContent = "Please fill in both a name and a link.";
     return;
   }
 
-  addBookmark(name, url, selectedCategoryId);
+  // Destination comes from the form's optional pickers (which default to the
+  // current context). Blank folder → Global; blank subfolder → that folder's
+  // Unsorted. So leaving them alone keeps the bookmark where you are.
+  const categoryId = bkFolder.value || null;
+  const subfolderId = categoryId ? bkSub.value || null : null;
 
-  // Clear the fields but keep the folder open, so adding several bookmarks in
-  // a row stays quick.
+  // Jump to where the bookmark will land so you can see it (and adding several
+  // to the same place in a row stays quick). addBookmark() re-renders.
+  selectedCategoryId = categoryId;
+  selectedSubfolderId = subfolderId;
+  addBookmark(name, url, categoryId, subfolderId);
+
+  // Clear the text fields; keep the chosen destination.
   nameInput.value = "";
   urlInput.value = "";
   nameInput.focus();
 });
 
+// Changing the folder picker rebuilds the subfolder options and refreshes the
+// helper text; changing the subfolder just refreshes the helper text.
+bkFolder.addEventListener("change", () => {
+  fillBookmarkSubfolders(bkFolder.value, "");
+  updateAddHint();
+});
+bkSub.addEventListener("change", updateAddHint);
+
 // Filter as the user types. A non-empty query switches the content pane into
-// search mode; clearing it returns to the open folder.
+// global search mode; clearing it returns to the open folder/subfolder.
 searchInput.addEventListener("input", () => {
   searchQuery = searchInput.value.trim().toLowerCase();
   if (searchQuery) layout.classList.add("layout--show-content");
   render();
+});
+
+renameSubfolderBtn.addEventListener("click", () => {
+  if (selectedSubfolderId === null || selectedSubfolderId === UNSORTED_ID) return;
+  const current = subfolderName(selectedSubfolderId);
+  const next = prompt("Rename subfolder:", current);
+  if (next === null) return; // cancelled
+  const name = next.trim();
+  if (!name) return;
+  if (name.toLowerCase() === "unsorted") {
+    alert("“Unsorted” is reserved for loose links.");
+    return;
+  }
+  // Reject a duplicate name within the same folder (ignoring itself).
+  const clash = subfoldersOf(selectedCategoryId).some(
+    (s) => s.id !== selectedSubfolderId && s.name.toLowerCase() === name.toLowerCase()
+  );
+  if (clash) {
+    alert(`"${name}" already exists here.`);
+    return;
+  }
+  renameSubfolder(selectedSubfolderId, name);
+});
+
+deleteSubfolderBtn.addEventListener("click", () => {
+  if (selectedSubfolderId === null || selectedSubfolderId === UNSORTED_ID) return;
+  const name = subfolderName(selectedSubfolderId);
+  const count = bookmarksInSubfolder(selectedCategoryId, selectedSubfolderId).length;
+  const note = count
+    ? `\n\nIts ${count} bookmark(s) will move to "Unsorted" — nothing is deleted.`
+    : "";
+  if (confirm(`Delete subfolder "${name}"?${note}`)) {
+    deleteSubfolder(selectedSubfolderId);
+  }
+});
+
+// Clicking the app title returns to GLOBAL (its own "home"), which is where
+// Global Unsorted lives.
+homeLink.addEventListener("click", goGlobal);
+homeLink.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    goGlobal();
+  }
 });
 
 // Mobile only: go back from a folder's contents to the folder list.
@@ -508,5 +1027,5 @@ backBtn.addEventListener("click", () => {
   layout.classList.remove("layout--show-content");
 });
 
-// Show everything as soon as the page loads.
+// The app opens in GLOBAL (nothing selected) — the natural top-level context.
 render();
