@@ -637,4 +637,17 @@ body {
   .content__back {
     display: inline-block;
   }
+
+  /* On a narrow phone, back button + breadcrumb + count pill + Rename/Delete
+     all fighting for one row crushes the folder/subfolder name down to a
+     couple of letters. Let the action buttons wrap onto their own row
+     instead of shrinking the name. */
+  .content__head {
+    flex-wrap: wrap;
+  }
+
+  .subfolder-actions {
+    flex-basis: 100%;
+    justify-content: flex-end;
+  }
 }
