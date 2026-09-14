@@ -8,6 +8,15 @@ Built with plain **HTML, CSS, and JavaScript** (no framework, no build step). Da
 
 ---
 
+<p align="center">
+  <img src="docs/screenshot-desktop.png" alt="Desktop view: a folder open with a subfolder and a loose bookmark, plus the Rename/Delete and Export/Import controls" width="720">
+</p>
+<p align="center">
+  <img src="docs/screenshot-mobile.png" alt="Mobile view: the single-pane folder list" width="220">
+</p>
+
+---
+
 ## Highlights
 
 - **Two-level organisation** — Folder → Subfolder → Bookmark, deliberately capped at one level of nesting so it never becomes a maze.
@@ -56,7 +65,8 @@ npx serve .
 bookmark-app/
 ├── index.html   # markup: sidebar (folders + search) and content pane
 ├── style.css    # theme tokens, two-pane layout, components
-└── script.js    # state, rendering, and all interactions
+├── script.js    # state, rendering, and all interactions
+└── docs/        # README screenshots
 ```
 
 ## Possible next steps
