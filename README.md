@@ -22,7 +22,8 @@ Built with plain **HTML, CSS, and JavaScript** (no framework, no build step). Da
 
 - Create, rename, and delete folders and subfolders
 - Add, edit, and delete bookmarks; move a bookmark between folders/subfolders while editing
-- Deleting a subfolder keeps its bookmarks (they move to **Unsorted**) — no accidental data loss
+- Deleting a folder or subfolder keeps what's inside (bookmarks move up to **Unsorted** / **GLOBAL**) — no accidental data loss
+- **Export/Import as JSON** — back up everything to a file, or carry it to a different browser or hosting location. Import is merge-safe (matched by id), so importing the same file more than once never creates duplicates
 - Favicons fetched per link for quick visual scanning
 - All data persists locally between sessions
 
@@ -31,6 +32,7 @@ Built with plain **HTML, CSS, and JavaScript** (no framework, no build step). Da
 - **No dependencies / no build** — open `index.html` and it runs.
 - **Backward-compatible data model** — bookmarks are stored as a flat list keyed by `categoryId` and an optional `subfolderId`. A missing `subfolderId` simply means "Unsorted", so the data format could grow (folders → subfolders → GLOBAL) without migrating or losing anything already saved.
 - **Safe rendering** — all user-entered text (names, URLs, search highlights) is inserted via `textContent`/DOM nodes rather than `innerHTML`, so bookmark data can't inject markup.
+- **Storage is per-origin, not per-file** — `localStorage` is scoped to the exact URL a page is opened from. Two consequences worth knowing: (1) opening `index.html` via a `file://` path scopes data to that *exact folder path* — moving or renaming the folder means the next open starts empty (the old data isn't gone, just stranded under the old path); (2) the local file and the [hosted version](https://evabecvarova.github.io/bookmark-app/) are different origins with entirely separate data — they never sync automatically. Export/Import is the bridge between any two of these.
 
 ## Running it locally
 
@@ -59,7 +61,7 @@ bookmark-app/
 
 ## Possible next steps
 
-- Import/export bookmarks (JSON) and browser-bookmarks import
+- Import from browser bookmarks (Chrome/Firefox export format)
 - Drag-and-drop to reorder and re-file links
 - Optional cloud sync
 
