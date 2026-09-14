@@ -146,11 +146,19 @@ body {
   margin-top: 8px;
 }
 
-/* Rename/Delete buttons for the open subfolder. */
+/* Rename/Delete buttons for the open subfolder (and, reusing the same class,
+   for the open folder). The [hidden] selector here has to match the class
+   selector's specificity so JS toggling the `hidden` attribute actually wins
+   the cascade — otherwise `display: inline-flex` below always shows it,
+   whether or not it's meant to be visible. */
 .subfolder-actions {
   display: inline-flex;
   gap: 0.4rem;
   flex-shrink: 0;
+}
+
+.subfolder-actions[hidden] {
+  display: none;
 }
 
 /* The mobile-only "back to folders" button; hidden on desktop. */
@@ -317,6 +325,32 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
+}
+
+/* --- Export/Import (sidebar footer) --- */
+.sidebar__data {
+  border-top: 1px solid var(--border);
+  padding-top: 1rem;
+}
+
+.sidebar__data-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.sidebar__data-row .btn {
+  flex: 1;
+}
+
+.data-status {
+  font-size: 0.85rem;
+  margin-top: 0.4rem;
+  min-height: 1.1em;
+  color: var(--text-muted);
+}
+
+.data-status--error {
+  color: #b91c1c;
 }
 
 /* Each folder is a full-width clickable row. */

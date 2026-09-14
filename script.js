@@ -58,6 +58,15 @@ const subfolderActions = document.getElementById("subfolder-actions");
 const renameSubfolderBtn = document.getElementById("rename-subfolder");
 const deleteSubfolderBtn = document.getElementById("delete-subfolder");
 
+const folderActions = document.getElementById("folder-actions");
+const renameFolderBtn = document.getElementById("rename-folder");
+const deleteFolderBtn = document.getElementById("delete-folder");
+
+const exportBtn = document.getElementById("export-btn");
+const importBtn = document.getElementById("import-btn");
+const importFileInput = document.getElementById("import-file");
+const dataStatus = document.getElementById("data-status");
+
 // Which bookmark is currently being edited (null = none).
 let editingId = null;
 
@@ -684,6 +693,10 @@ function renderContent(categories) {
     selectedSubfolderId !== UNSORTED_ID;
   // Rename/Delete only make sense for a real (non-Unsorted) open subfolder.
   subfolderActions.hidden = !inRealSubfolder;
+  // Folder-level Rename/Delete: only at the folder's own Unsorted level —
+  // once you've stepped into a real subfolder, that action bar above takes
+  // over instead.
+  folderActions.hidden = searching || selectedCategoryId === null || inRealSubfolder;
 
   renderBreadcrumb();
 
@@ -797,6 +810,25 @@ function addCategory(name) {
   saveCategories(categories);
   // Open the folder we just made so the next step is adding a subfolder.
   selectCategory(newCategory.id);
+}
+
+function renameCategory(id, name) {
+  const categories = loadCategories().map((c) =>
+    c.id === id ? { ...c, name: name } : c
+  );
+  saveCategories(categories);
+  render();
+}
+
+// Delete a folder but KEEP everything in it — its own bookmarks and any
+// bookmarks in its subfolders become loose and resurface under GLOBAL /
+// Unsorted (the existing "unknown folder" handling already treats a bookmark
+// whose categoryId points at nothing as GLOBAL, same idea as deleteSubfolder
+// above). Its subfolders are removed since they'd have nowhere to live.
+function deleteCategory(id) {
+  saveCategories(loadCategories().filter((c) => c.id !== id));
+  saveSubfolders(loadSubfolders().filter((s) => s.categoryId !== id));
+  goGlobal();
 }
 
 function addSubfolder(categoryId, name) {
@@ -1012,6 +1044,42 @@ deleteSubfolderBtn.addEventListener("click", () => {
   }
 });
 
+renameFolderBtn.addEventListener("click", () => {
+  if (selectedCategoryId === null) return;
+  const current = categoryName(selectedCategoryId);
+  const next = prompt("Rename folder:", current);
+  if (next === null) return; // cancelled
+  const name = next.trim();
+  if (!name) return;
+  // Reject a duplicate name among top-level folders (ignoring itself).
+  const clash = loadCategories().some(
+    (c) => c.id !== selectedCategoryId && c.name.toLowerCase() === name.toLowerCase()
+  );
+  if (clash) {
+    alert(`"${name}" already exists.`);
+    return;
+  }
+  renameCategory(selectedCategoryId, name);
+});
+
+deleteFolderBtn.addEventListener("click", () => {
+  if (selectedCategoryId === null) return;
+  const name = categoryName(selectedCategoryId);
+  const subCount = subfoldersOf(selectedCategoryId).length;
+  const bookmarkCount = loadBookmarks().filter(
+    (b) => b.categoryId === selectedCategoryId
+  ).length;
+  const parts = [];
+  if (subCount) parts.push(`${subCount} subfolder(s)`);
+  if (bookmarkCount) parts.push(`${bookmarkCount} bookmark(s)`);
+  const note = parts.length
+    ? `\n\nIts ${parts.join(" and ")} will move to GLOBAL / Unsorted — nothing is deleted.`
+    : "";
+  if (confirm(`Delete folder "${name}"?${note}`)) {
+    deleteCategory(selectedCategoryId);
+  }
+});
+
 // Clicking the app title returns to GLOBAL (its own "home"), which is where
 // Global Unsorted lives.
 homeLink.addEventListener("click", goGlobal);
@@ -1025,6 +1093,116 @@ homeLink.addEventListener("keydown", (e) => {
 // Mobile only: go back from a folder's contents to the folder list.
 backBtn.addEventListener("click", () => {
   layout.classList.remove("layout--show-content");
+});
+
+// --- Export / Import -------------------------------------------------------
+// Data lives only in this page's localStorage — tied to this exact browser
+// *and* file location — so it doesn't follow the file if it's moved, copied,
+// or opened somewhere else. Export/Import is the manual way to carry it over.
+
+function setDataStatus(text, isError) {
+  dataStatus.textContent = text;
+  dataStatus.classList.toggle("data-status--error", Boolean(isError));
+}
+
+// Bundle everything into one JSON file for the browser to download.
+function exportData() {
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    categories: loadCategories(),
+    subfolders: loadSubfolders(),
+    bookmarks: loadBookmarks(),
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `bookmarks-export-${payload.exportedAt.slice(0, 10)}.json`;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// Merge an imported bundle into what's already here. Existing items are never
+// touched or removed — only items whose id isn't already present get added —
+// so importing the same export file more than once (e.g. while slowly moving
+// everything over to a new file location) is always safe to redo.
+function importData(payload) {
+  const categories = loadCategories();
+  const knownCategoryIds = new Set(categories.map((c) => c.id));
+  const newCategories = (payload.categories || []).filter(
+    (c) => !knownCategoryIds.has(c.id)
+  );
+  saveCategories(categories.concat(newCategories));
+
+  const subfolders = loadSubfolders();
+  const knownSubfolderIds = new Set(subfolders.map((s) => s.id));
+  const newSubfolders = (payload.subfolders || []).filter(
+    (s) => !knownSubfolderIds.has(s.id)
+  );
+  saveSubfolders(subfolders.concat(newSubfolders));
+
+  const bookmarks = loadBookmarks();
+  const knownBookmarkIds = new Set(bookmarks.map((b) => b.id));
+  const newBookmarks = (payload.bookmarks || []).filter(
+    (b) => !knownBookmarkIds.has(b.id)
+  );
+  saveBookmarks(bookmarks.concat(newBookmarks));
+
+  return {
+    categories: newCategories.length,
+    subfolders: newSubfolders.length,
+    bookmarks: newBookmarks.length,
+  };
+}
+
+exportBtn.addEventListener("click", () => {
+  exportData();
+  setDataStatus("Exported ✓");
+});
+
+importBtn.addEventListener("click", () => {
+  importFileInput.click();
+});
+
+importFileInput.addEventListener("change", () => {
+  const file = importFileInput.files[0];
+  importFileInput.value = ""; // so picking the same file again still fires "change"
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    let payload;
+    try {
+      payload = JSON.parse(reader.result);
+    } catch (e) {
+      setDataStatus("That file isn't valid JSON.", true);
+      return;
+    }
+    const looksRight =
+      payload &&
+      Array.isArray(payload.categories) &&
+      Array.isArray(payload.subfolders) &&
+      Array.isArray(payload.bookmarks);
+    if (!looksRight) {
+      setDataStatus("That doesn't look like a Bookmarks export.", true);
+      return;
+    }
+
+    const added = importData(payload);
+    const total = added.categories + added.subfolders + added.bookmarks;
+    setDataStatus(
+      total === 0
+        ? "Nothing new to import — already up to date."
+        : `Imported ${added.categories} folder(s), ${added.subfolders} subfolder(s), ${added.bookmarks} bookmark(s).`
+    );
+    render();
+  };
+  reader.onerror = () => setDataStatus("Couldn't read that file.", true);
+  reader.readAsText(file);
 });
 
 // The app opens in GLOBAL (nothing selected) — the natural top-level context.

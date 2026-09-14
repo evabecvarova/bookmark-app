@@ -53,6 +53,18 @@
 
         <!-- Folder list renders here; each folder is a clickable button. -->
         <nav id="folder-list" class="folders" aria-label="Folders"></nav>
+
+        <!-- Backup/restore everything as a JSON file — useful for moving to a
+             new browser or file location, since the data itself lives only in
+             this page's localStorage and doesn't follow the file around. -->
+        <div class="sidebar__data">
+          <div class="sidebar__data-row">
+            <button type="button" id="export-btn" class="btn btn--ghost">Export</button>
+            <button type="button" id="import-btn" class="btn btn--ghost">Import</button>
+          </div>
+          <input type="file" id="import-file" accept="application/json" hidden />
+          <p id="data-status" class="data-status" role="status" aria-live="polite"></p>
+        </div>
       </aside>
 
       <!-- Content: the open folder's header, the add-bookmark form, and its
@@ -68,6 +80,12 @@
           <span id="subfolder-actions" class="subfolder-actions" hidden>
             <button type="button" id="rename-subfolder" class="btn btn--ghost">Rename</button>
             <button type="button" id="delete-subfolder" class="btn btn--danger">Delete</button>
+          </span>
+          <!-- Rename/delete the open folder; shown only at a folder's own
+               Unsorted level (not while a real subfolder is open). -->
+          <span id="folder-actions" class="subfolder-actions" hidden>
+            <button type="button" id="rename-folder" class="btn btn--ghost">Rename</button>
+            <button type="button" id="delete-folder" class="btn btn--danger">Delete</button>
           </span>
         </header>
 
